@@ -2,7 +2,7 @@ const axios = require("axios");
 
 module.exports.config = {
   name: "help",
-  version: "1.0",
+  version: "1.1",
   author: "Lord Denish",
   role: 0,
   shortDescription: "Show bot commands",
@@ -29,18 +29,23 @@ module.exports.onStart = async function ({ api, event, commandName }) {
     const seconds = Math.floor(uptime % 60);
     const uptimeStr = `${hours}h ${minutes}m ${seconds}s`;
 
-    // Command list (You can modify categories & commands)
-    const commands = {
-      "🛠 Utility": ["help", "uptime", "ping", "stats"],
-      "🎭 Fun": ["joke", "meme", "quote"],
-      "🎵 Music": ["play", "pause", "resume", "stop"],
-      "📸 Media": ["pinterest", "image", "gif"],
-      "⚙ Admin": ["ban", "unban", "setprefix"]
-    };
+    // Dynamically get all commands from your bot's commands map
+    // Assuming your bot stores commands in global.GoatBot.commands as a Map or object
+    const allCommands = global.GoatBot?.commands; // adjust this if your bot uses a different variable
+    if (!allCommands) return api.sendMessage("❌ | Commands not found in bot.", event.threadID, event.messageID);
 
+    // Group commands by category
+    const categories = {};
+    for (const [cmdName, cmdObj] of allCommands.entries()) {
+      const category = cmdObj.config.category || "Uncategorized";
+      if (!categories[category]) categories[category] = [];
+      categories[category].push(cmdName);
+    }
+
+    // Format command list
     let commandList = "";
-    for (const [category, cmds] of Object.entries(commands)) {
-      commandList += `\n${category}:\n- ${cmds.join("\n- ")}\n`;
+    for (const [category, cmds] of Object.entries(categories)) {
+      commandList += `\n${category}:\n- ${cmds.sort().join("\n- ")}\n`;
     }
 
     // Final message
