@@ -20,7 +20,7 @@ module.exports = {
 
     try {
       // List of anime search keywords
-      const searchList = ["lelouch", "tanjiro", "ashta", "ichigo", "aizen", "luffy", "zoro"];
+      const searchList = ["lelouch", "tanjiro", "ichigo", "aizen", "luffy", "zoro"];
       const randomSearch = searchList[Math.floor(Math.random() * searchList.length)];
 
       // Build Pinterest API URL
