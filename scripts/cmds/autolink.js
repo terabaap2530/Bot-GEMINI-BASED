@@ -6,7 +6,7 @@ const { parse } = require("url");
 // Map hostnames to Universal Downloader API endpoints
 const PLATFORM_API_MAP = {
     "instagram": "/api/meta/download",
-    "facebook": "/api/meta/download", // Facebook now uses meta
+    "facebook": "/api/meta/download",
     "tiktok": "/api/tiktok/download",
     "youtube": "/api/youtube/download",
     "reddit": "/api/reddit/download",
@@ -17,10 +17,29 @@ const PLATFORM_API_MAP = {
     "x.com": "/api/twitter/download"
 };
 
+// Helper to expand short TikTok links
+async function expandTikTokUrl(shortUrl) {
+    try {
+        const res = await axios.get(shortUrl, {
+            maxRedirects: 0,
+            validateStatus: (status) => status >= 200 && status < 400
+        });
+        if (res.status === 301 || res.status === 302) {
+            return res.headers.location;
+        }
+        return shortUrl; // already full link
+    } catch (err) {
+        if (err.response && (err.response.status === 301 || err.response.status === 302)) {
+            return err.response.headers.location;
+        }
+        return shortUrl;
+    }
+}
+
 module.exports = {
     config: {
         name: "autolink",
-        version: "8.0",
+        version: "8.2",
         author: "Lord Denish",
         countDown: 5,
         role: 0,
@@ -38,8 +57,17 @@ module.exports = {
             const urlMatch = text.match(/https?:\/\/[^\s]+/i);
             if (!urlMatch) return;
 
-            const url = urlMatch[0].replace(/\?$/, "");
-            const hostname = parse(url).hostname.toLowerCase();
+            let url = urlMatch[0].replace(/\?$/, "");
+            let hostname = parse(url).hostname.toLowerCase();
+
+            // React ⏳ for download started
+            api.setMessageReaction("⏳", event.messageID, () => {}, true);
+
+            // Expand TikTok short link if needed
+            if (hostname.includes("tiktok") && url.includes("vt.tiktok.com")) {
+                url = await expandTikTokUrl(url);
+                hostname = parse(url).hostname.toLowerCase();
+            }
 
             // Determine which API endpoint to use
             let apiEndpoint = null;
@@ -51,9 +79,6 @@ module.exports = {
             }
             if (!apiEndpoint) return; // Unsupported platform
 
-            // React ⏳ for download started
-            api.setMessageReaction("⏳", event.messageID, () => {}, true);
-
             const apiUrl = `https://universaldownloaderapi.vercel.app${apiEndpoint}?url=${encodeURIComponent(url)}`;
             const res = await axios.get(apiUrl, { timeout: 30000 });
             const data = res.data;
@@ -61,16 +86,22 @@ module.exports = {
             // Determine the correct video URL depending on platform
             let videoUrl = null;
 
-            // Instagram / Facebook (meta endpoint)
-            if (data?.data?.data?.length > 0 && data.data.data[0].url) {
-                videoUrl = data.data.data[0].url;
-            }
-            // TikTok / YouTube
-            else if (data?.download_url) {
+            if (hostname.includes("instagram") || hostname.includes("facebook") || hostname.includes("meta")) {
+                if (data?.data?.data?.length > 0 && data.data.data[0].url) {
+                    videoUrl = data.data.data[0].url;
+                }
+            } 
+            else if (hostname.includes("tiktok")) {
+                if (data?.success && data?.data?.video_no_watermark?.url) {
+                    videoUrl = data.data.video_no_watermark.url;
+                } else if (data?.success && data?.data?.video_watermark?.url) {
+                    videoUrl = data.data.video_watermark.url;
+                }
+            } 
+            else if (hostname.includes("youtube") && data?.download_url) {
                 videoUrl = data.download_url;
-            }
-            // Reddit / Twitter / Others
-            else if (data?.data?.[0]?.video_url) {
+            } 
+            else if ((hostname.includes("reddit") || hostname.includes("twitter") || hostname.includes("x.com")) && data?.data?.[0]?.video_url) {
                 videoUrl = data.data[0].video_url;
             }
 
