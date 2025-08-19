@@ -3,11 +3,12 @@ const axios = require("axios");
 module.exports = {
     config: {
         name: "gemini",
+        aliases: ["gem", "gim", "gemini"], // short names supported
         version: "1.0",
         author: "Lord Denish",
         role: 0,
         shortDescription: "Gemini-Pro AI command",
-        longDescription: "Replies when a message starts with 'Gemini', 'Gemini:' or 'Gemini,'.",
+        longDescription: "Replies when a message starts with 'Gemini', 'Gim', or 'Gem'.",
         category: "ai"
     },
 
@@ -18,11 +19,14 @@ module.exports = {
             const text = event.body;
             if (!text) return;
 
-            // Match Gemini trigger (case-insensitive)
-            const match = text.match(/^\s*gemini[:,]?\s*(.*)/i);
+            // Build regex dynamically from aliases
+            const triggers = ["gemini", "gim", "gem"];
+            const regex = new RegExp(`^\\s*(${triggers.join("|")})[:,]?\\s*(.*)`, "i");
+
+            const match = text.match(regex);
             if (!match) return;
 
-            const question = match[1].trim();
+            const question = match[2]?.trim();
             if (!question) return;
 
             // Show ⏳ reaction during processing
