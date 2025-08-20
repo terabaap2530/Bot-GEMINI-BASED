@@ -1,0 +1,109 @@
+const fs = require("fs");
+const path = require("path");
+
+const dataPath = path.join(__dirname, "nicknames.json");
+
+// Load stored nicknames
+function loadData() {
+  try {
+    return JSON.parse(fs.readFileSync(dataPath, "utf8"));
+  } catch {
+    return {};
+  }
+}
+
+// Save stored nicknames
+function saveData(data) {
+  fs.writeFileSync(dataPath, JSON.stringify(data, null, 2));
+}
+
+module.exports = {
+  config: {
+    name: "nicknamelock",
+    aliases: ["nlock", "permanick"],
+    version: "4.1",
+    author: "Lord Denish",
+    countDown: 5,
+    role: 2, // only bot admin
+    shortDescription: "Set & lock all nicknames",
+    longDescription: "Set one nickname for all members and lock it. Auto-lock applies to new members too.",
+    category: "group",
+    guide: "{pn} <nickname> | off"
+  },
+
+  onStart: async function ({ api, event, args }) {
+    const { threadID } = event;
+    const data = loadData();
+
+    if (!args[0]) {
+      return api.sendMessage("⚡ Usage: nicknamelock <nickname> | off", threadID);
+    }
+
+    // Turn off lock
+    if (args[0].toLowerCase() === "off") {
+      if (data[threadID]) {
+        data[threadID].locked = false;
+        saveData(data);
+      }
+      return api.sendMessage("🔓 Nickname lock disabled for this group.", threadID);
+    }
+
+    // Set and lock one nickname for all
+    const newNick = args.join(" ");
+    const threadInfo = await api.getThreadInfo(threadID);
+
+    if (!data[threadID]) data[threadID] = { locked: true, nicks: {}, uniform: true };
+
+    for (const uid of threadInfo.participantIDs) {
+      await api.changeNickname(newNick, threadID, uid);
+      data[threadID].nicks[uid] = newNick;
+    }
+
+    data[threadID].locked = true;
+    data[threadID].uniform = true; // uniform nickname lock mode
+    data[threadID].defaultNick = newNick;
+    saveData(data);
+
+    return api.sendMessage(`✅ All nicknames changed & locked as: "${newNick}"`, threadID);
+  },
+
+  onEvent: async function ({ api, event }) {
+    const data = loadData();
+    const { threadID } = event;
+
+    if (!data[threadID] || !data[threadID].locked) return;
+
+    // Nickname change detect
+    if (event.logMessageType === "log:user-nickname") {
+      const { nickname, participant_id } = event.logMessageData;
+
+      if (data[threadID].uniform) {
+        const lockedNick = data[threadID].defaultNick;
+
+        if (nickname !== lockedNick) {
+          const botAdmins = ["1000xxxxxxxxxx", "1000yyyyyyyyyy"]; // <-- Put your FB UIDs here
+          if (botAdmins.includes(event.author)) {
+            data[threadID].defaultNick = nickname; // admin updated lock
+            saveData(data);
+            return;
+          }
+
+          await api.changeNickname(lockedNick, threadID, participant_id);
+        }
+      }
+    }
+
+    // New member added → give same nickname & lock
+    if (event.logMessageType === "log:subscribe") {
+      if (!data[threadID].uniform) return;
+
+      const lockedNick = data[threadID].defaultNick;
+      for (const user of event.logMessageData.addedParticipants) {
+        const uid = user.userFbId;
+        await api.changeNickname(lockedNick, threadID, uid);
+        data[threadID].nicks[uid] = lockedNick;
+      }
+      saveData(data);
+    }
+  }
+};
