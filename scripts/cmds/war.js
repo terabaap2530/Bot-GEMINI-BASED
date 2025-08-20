@@ -447,4 +447,16 @@ module.exports = {
 		}
 
 		// Turn OFF war
-		if (action ===
+		if (action === "f") {
+			if (!activeLoops[event.threadID]) {
+				return api.sendMessage("⚠️ No war is currently running in this chat.", event.threadID);
+			}
+			clearInterval(activeLoops[event.threadID]);
+			delete activeLoops[event.threadID];
+			return api.sendMessage(`🛑 War stopped against ${name}.`, event.threadID);
+		}
+
+		// Wrong usage
+		return api.sendMessage("📌 Use:\nwar @mention o → start war\nwar @mention f → stop war", event.threadID);
+	}
+};
