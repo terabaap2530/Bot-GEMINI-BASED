@@ -21,30 +21,39 @@ module.exports = {
   config: {
     name: "groupname",
     aliases: ["gcname", "permagc"],
-    version: "1.0",
-    author: "Lord Denish",
+    version: "1.2",
+    author: "Lord Denish + Modified Silent",
     countDown: 5,
     role: 2, // only bot admin
-    shortDescription: "Lock group name",
-    longDescription: "Set and lock the group name. Only bot admin can change it.",
+    shortDescription: "Lock/Unlock group name silently",
+    longDescription: "Set and lock the group name. Use 'off' to unlock. Works silently without notifications.",
     category: "group",
-    guide: "{pn} [new name]"
+    guide: "{pn} [new name | off]"
   },
 
   onStart: async function ({ api, event, args }) {
     const data = loadData();
     const { threadID } = event;
 
-    if (!args[0]) {
-      return api.sendMessage("⚡ Usage: groupname <new name>", threadID);
+    if (!args[0]) return;
+
+    const input = args.join(" ");
+
+    // Unlock system
+    if (input.toLowerCase() === "off" || input.toLowerCase() === "unlock") {
+      if (data[threadID]) {
+        delete data[threadID];
+        saveData(data);
+      }
+      return;
     }
 
-    const newName = args.join(" ");
+    // Lock system
+    const newName = input;
     data[threadID] = newName;
     saveData(data);
 
     await api.setTitle(newName, threadID);
-    api.sendMessage(`✅ Group name locked as: ${newName}`, threadID);
   },
 
   // Detect if someone changes the group name
@@ -53,12 +62,8 @@ module.exports = {
       const data = loadData();
       const { threadID, logMessageData, author } = event;
 
-      // Auto store group if bot newly added
-      if (!data[threadID]) {
-        data[threadID] = logMessageData.name;
-        saveData(data);
-        return;
-      }
+      // If lock not enabled → do nothing
+      if (!data[threadID]) return;
 
       const savedName = data[threadID];
       const newName = logMessageData.name;
@@ -72,12 +77,8 @@ module.exports = {
           return;
         }
 
-        // Otherwise, reset name
+        // Otherwise, reset name silently
         await api.setTitle(savedName, threadID);
-        api.sendMessage(
-          `⚠️ Group name is locked as: ${savedName}\n❌ Only bot admin can change it.`,
-          threadID
-        );
       }
     }
   }
