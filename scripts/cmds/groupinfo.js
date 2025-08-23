@@ -1,61 +1,87 @@
+const fs = require("fs");
 const axios = require("axios");
 
 module.exports = {
   config: {
-    name: "groupinfo",
-    version: "2.1",
-    author: "Lord Denish",
+    name: "gcinfo",
+    aliases: ["groupinfo", "chatinfo"],
+    author: "Lord Itachi",
+    version: "2.0",
+    cooldowns: 5,
     role: 0,
-    shortDescription: "Group info with admin names and image",
-    longDescription: "Shows group name, total members, gender counts, admin names, and group image",
-    category: "info",
-    guide: "{pn}"
+    shortDescription: "Show detailed group info",
+    longDescription: "Displays complete information about the group chat including members, admins, emoji, approval mode, and more.",
+    category: "group",
+    guide: "{p}gcinfo"
   },
 
-  onStart: async function({ api, event }) {
+  onStart: async function ({ api, event, message }) {
     try {
       const threadInfo = await api.getThreadInfo(event.threadID);
-      const members = threadInfo.participantIDs;
-      const admins = threadInfo.adminIDs || [];
 
-      let boys = 0, girls = 0, unknown = 0;
-      let adminNames = [];
+      const threadName = threadInfo.threadName || "Unnamed Group";
+      const threadID = event.threadID;
+      const emoji = threadInfo.emoji || "❌ Not set";
+      const imageSrc = threadInfo.imageSrc || null;
+      const approvalMode = threadInfo.approvalMode ? "ON" : "OFF";
+      const adminIDs = threadInfo.adminIDs.map(admin => admin.id);
+      const adminList = threadInfo.userInfo
+        .filter(user => adminIDs.includes(user.id))
+        .map(user => `• ${user.name} (${user.id})`);
 
-      for (const id of members) {
-        try {
-          const user = await api.getUserInfo(id);
-          const fullName = user[id].name;
-          const firstName = fullName.split(" ")[0];
-          const genderRes = await axios.get(`https://api.genderize.io?name=${encodeURIComponent(firstName)}`);
-          const gender = genderRes.data.gender;
+      const members = threadInfo.participantIDs.length;
+      const genderStats = threadInfo.userInfo.reduce((acc, user) => {
+        if (user.gender === 'MALE') acc.male++;
+        else if (user.gender === 'FEMALE') acc.female++;
+        else acc.unknown++;
+        return acc;
+      }, { male: 0, female: 0, unknown: 0 });
 
-          if (gender === "male") boys++;
-          else if (gender === "female") girls++;
-          else unknown++;
+      const messageCount = threadInfo.messageCount?.toLocaleString() || "Unknown";
+      const nicknames = threadInfo.nicknames
+        ? Object.entries(threadInfo.nicknames).map(([id, nick]) => {
+            const name = threadInfo.userInfo.find(user => user.id === id)?.name || id;
+            return `• ${name}: ${nick}`;
+          })
+        : [];
 
-          if (admins.includes(id)) adminNames.push(fullName);
+      const body = 
+`===== [ GROUP INFO ] =====
 
-        } catch {
-          unknown++;
-        }
+• Name: ${threadName}
+• ID: ${threadID}
+• Emoji: ${emoji}
+• Approval Mode: ${approvalMode}
+
+===== [ MEMBERS ] =====
+
+• Total: ${members}
+• Male: ${genderStats.male}
+• Female: ${genderStats.female}
+• Unknown: ${genderStats.unknown}
+
+===== [ ADMINS (${adminList.length}) ] =====
+${adminList.join("\n") || "No admins found"}
+
+===== [ STATS ] =====
+
+• Total Messages: ${messageCount}
+
+===== [ NICKNAMES ] =====
+${nicknames.join("\n") || "None set"}
+
+`;
+
+      if (imageSrc) {
+        const imgRes = await axios.get(imageSrc, { responseType: "stream" });
+        return message.reply({ body, attachment: imgRes.data });
+      } else {
+        return message.reply(body);
       }
 
-      const msg = `📌 Group Name: ${threadInfo.name}\n` +
-                  `👥 Total Members: ${members.length}\n` +
-                  `👦 Boys: ${boys}\n` +
-                  `👧 Girls: ${girls}\n` +
-                  `🛡 Admins: ${admins.length} ${adminNames.length ? `(${adminNames.join(", ")})` : ""}\n` +
-                  `❔ Unknown Gender: ${unknown}\n` +
-                  `📝 Gender info counts only registered members`;
-
-      api.sendMessage({
-        body: msg,
-        attachment: await global.utils.getStreamFromURL(threadInfo.imageSrc || threadInfo.imageSrcSmall)
-      }, event.threadID);
-
-    } catch (err) {
-      console.error(err);
-      api.sendMessage("❌ Failed to fetch group information.", event.threadID);
+    } catch (error) {
+      console.error(error);
+      return message.reply("❌ An error occurred while fetching group info.");
     }
   }
 };
