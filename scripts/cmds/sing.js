@@ -1,123 +1,118 @@
 const axios = require("axios");
 const fs = require("fs-extra");
 const path = require("path");
-const { exec } = require("child_process");
 
 const CACHE_FOLDER = path.join(__dirname, "cache");
-const YT_SEARCH_API = "https://dns-pxx0.onrender.com/search?query=";
-const MINATO_DOWNLOAD_API_BASE = "https://youtube-minato-lamda.vercel.app/api/download?videoId=";
+const DOWNLOAD_API_KEY = "74960cb2-da41-4b5c-b8b2-086d0c77751e";
+const METADATA_API_KEY = "173c7c50-02d9-4b22-a83a-519ea6f93429";
 
-// Ensure cache folder exists
-fs.ensureDirSync(CACHE_FOLDER);
+async function downloadAudio(downloadUrl, filePath) {
+ const writer = fs.createWriteStream(filePath);
 
-// Download a file
-async function downloadFile(url, filePath) {
-  const writer = fs.createWriteStream(filePath);
-  const response = await axios({ url, method: "GET", responseType: "stream" });
-  response.data.pipe(writer);
-  return new Promise((resolve, reject) => {
-    writer.on("finish", resolve);
-    writer.on("error", reject);
-  });
+ const response = await axios({
+ url: downloadUrl,
+ method: "GET",
+ responseType: "stream",
+ });
+
+ return new Promise((resolve, reject) => {
+ response.data.pipe(writer);
+ writer.on("finish", resolve);
+ writer.on("error", reject);
+ });
 }
 
-// Convert video to MP3
-function convertToMp3(inputPath, outputPath) {
-  return new Promise((resolve, reject) => {
-    exec(`ffmpeg -y -i "${inputPath}" -vn -ar 44100 -ac 2 -b:a 192k "${outputPath}"`, (err) => {
-      if (err) reject(err);
-      else resolve();
-    });
-  });
+async function fetchAudioFromReply(event) {
+ const attachment = event.messageReply?.attachments?.[0];
+ if (!attachment || (attachment.type !== "video" && attachment.type !== "audio")) {
+ throw new Error("⚠️ | Please reply to a valid video or audio.");
+ }
+
+ const shortUrl = attachment.url;
+ const response = await axios.get(`https://audio-recon-ahcw.onrender.com/kshitiz?url=${encodeURIComponent(shortUrl)}`);
+ return response.data.title;
 }
 
-// Fetch song title from replied audio/video
-async function fetchTitleFromReply(event) {
-  const attachment = event.messageReply?.attachments?.[0];
-  if (!attachment || (attachment.type !== "audio" && attachment.type !== "video")) {
-    throw new Error("⚠️ | Please reply to a valid audio or video.");
-  }
-
-  const response = await axios.get(
-    `https://audio-recon-ahcw.onrender.com/kshitiz?url=${encodeURIComponent(attachment.url)}`
-  );
-  if (!response.data?.title) throw new Error("❌ | Could not identify the song from this file.");
-  return response.data.title;
+async function fetchAudioFromQuery(query) {
+ const response = await axios.get(`https://kaiz-apis.gleeze.com/api/yt-metadata?title=${encodeURIComponent(query)}&apikey=${METADATA_API_KEY}`);
+ const videoData = response.data;
+ if (videoData && videoData.url && videoData.videoId) {
+ return {
+ videoId: videoData.videoId,
+ title: videoData.title,
+ duration: videoData.duration || "Unknown",
+ url: videoData.url
+ };
+ } else {
+ throw new Error("❌ | No results found.");
+ }
 }
 
-// Fetch video data from YouTube search
-async function fetchVideoFromQuery(query) {
-  const searchRes = await axios.get(YT_SEARCH_API + encodeURIComponent(query));
-  const results = searchRes.data;
-  if (!results || results.length === 0) throw new Error("❌ No videos found for this query.");
-  const video = results[0];
-  return { videoId: video.videoId, title: video.title || "YouTube Audio" };
-}
+async function handleAudioCommand(api, event, args) {
+ const { threadID, messageID, messageReply } = event;
+ await fs.ensureDir(CACHE_FOLDER);
+ api.setMessageReaction("✅", messageID, () => {}, true);
 
-// Download audio stream from Minato API
-async function downloadAudioFromYouTube(videoId, title) {
-  const downloadRes = await axios.get(MINATO_DOWNLOAD_API_BASE + encodeURIComponent(videoId));
-  const streams = downloadRes.data.downloadResult?.response || {};
-  const bestStream = Object.values(streams)
-    .filter(v => v?.download_url)
-    .sort((a, b) => (b.bitrate || 0) - (a.bitrate || 0))[0];
-  if (!bestStream) throw new Error("❌ Could not find a downloadable stream.");
+ try {
+ let videoData;
 
-  const tempVideoPath = path.join(CACHE_FOLDER, `video_${Date.now()}.mp4`);
-  const tempAudioPath = path.join(CACHE_FOLDER, `audio_${Date.now()}.mp3`);
+ if (messageReply?.attachments?.length > 0) {
+ const title = await fetchAudioFromReply(event);
+ videoData = await fetchAudioFromQuery(title);
+ } else if (args.length > 0) {
+ const query = args.join(" ");
+ videoData = await fetchAudioFromQuery(query);
+ } else {
+ return api.sendMessage("⚠️ | Provide a search term or reply to a video/audio.", threadID, messageID);
+ }
 
-  await downloadFile(bestStream.download_url, tempVideoPath);
-  await convertToMp3(tempVideoPath, tempAudioPath);
+ const { videoId, title, duration, url } = videoData;
+ const filePath = path.join(CACHE_FOLDER, `${videoId}.mp3`);
 
-  return { tempVideoPath, tempAudioPath, title };
-}
+ const downloadResponse = await axios.get(`https://kaiz-apis.gleeze.com/api/ytdown-mp3?url=${encodeURIComponent(url)}&apikey=${DOWNLOAD_API_KEY}`);
+ const downloadData = downloadResponse.data;
 
-// Main command handler
-async function handleSingCommand({ api, event, args }) {
-  try {
-    let query = args.join(" ");
+ if (!downloadData.download_url) {
+ throw new Error("❌ | Couldn't retrieve audio download link.");
+ }
 
-    // If replying to audio/video → get title
-    if (event.type === "message_reply" && event.messageReply?.attachments?.length > 0) {
-      query = await fetchTitleFromReply(event);
-    }
+ await downloadAudio(downloadData.download_url, filePath);
 
-    if (!query) {
-      return api.sendMessage("⚠️ | Provide a search term or reply to audio/video.", event.threadID, event.messageID);
-    }
+ if (!fs.existsSync(filePath)) throw new Error("❌ | Downloaded file not found.");
+ const stats = fs.statSync(filePath);
+ if (stats.size === 0) {
+ fs.unlinkSync(filePath);
+ throw new Error("❌ | File is empty.");
+ }
+ if (stats.size > 25 * 1024 * 1024) {
+ fs.unlinkSync(filePath);
+ return api.sendMessage("⚠️ | Audio is too large to send (>25MB).", threadID, messageID);
+ }
 
-    // Get YouTube video info
-    const { videoId, title } = await fetchVideoFromQuery(query);
+ api.sendMessage({
+ body: `🎵 Title: ${title}\n🕒 Duration: ${duration}`,
+ attachment: fs.createReadStream(filePath)
+ }, threadID, () => fs.unlinkSync(filePath), messageID);
 
-    // Download audio
-    const { tempVideoPath, tempAudioPath, title: audioTitle } = await downloadAudioFromYouTube(videoId, title);
-
-    // Send audio
-    api.sendMessage(
-      { body: `🎵 ${audioTitle}`, attachment: fs.createReadStream(tempAudioPath) },
-      event.threadID,
-      () => {
-        fs.unlinkSync(tempVideoPath);
-        fs.unlinkSync(tempAudioPath);
-      },
-      event.messageID
-    );
-
-  } catch (err) {
-    console.error(err);
-    api.sendMessage(err.message || "❌ Something went wrong.", event.threadID, event.messageID);
-  }
+ } catch (error) {
+ api.sendMessage(error.message || "❌ | Something went wrong.", event.threadID, event.messageID);
+ }
 }
 
 module.exports = {
-  config: {
-    name: "sing",
-    version: "2.0",
-    author: "Lord Denish",
-    shortDescription: "Get exact song from audio/video or search term",
-    longDescription: "Reply to a voice/video or type a search term to download the song as MP3",
-    category: "media",
-    guide: "{pn} <search term> OR reply to audio/video",
-  },
-  onStart: handleSingCommand
+ config: {
+ name: "sing",
+ version: "1.0",
+ author: "Lord Itachi",
+ countDown: 10,
+ role: 0,
+ shortDescription: "Download audio from YouTube using title or reply to video/audio",
+ longDescription: "Use this command to convert a video/audio into MP3 and send back.",
+ category: "media",
+ guide: "{pn} <title>\nReply to audio/video for best result"
+ },
+
+ onStart: async function({ api, event, args }) {
+ return handleAudioCommand(api, event, args);
+ }
 };
