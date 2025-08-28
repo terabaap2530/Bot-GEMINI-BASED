@@ -1,26 +1,31 @@
 const activeLoops = {}; // Store active war loops per thread
 
 module.exports = {
-    config: {
-        name: "war2",
-        version: "2.0",
-        author: "LAWTIET",
-        role: 2,
-        category: "texts",
-        guide: {
-            en: "war2 @(mention) o|f"
-        }
+  config: {
+    name: "war2",
+    version: "2.0",
+    author: "LAWTIET",
+    role: 2,
+    category: "texts",
+    shortDescription: "Start or stop war messages",
+    longDescription: "Spam tagged user with war messages",
+    guide: {
+      en: "war2 @mention o → start war\nwar2 @mention f → stop war"
     },
+    countDown: 5 // Prevent instant spam on multiple calls
+  },
 
-    onStart: async function ({ api, event, args }) {
-        const mention = Object.keys(event.mentions)[0];
-        if (!mention) return api.sendMessage("⚠️ Tag 1 friend to start or stop the war.", event.threadID);
+  onStart: async function ({ api, event, args }) {
+    const mention = Object.keys(event.mentions)[0];
+    if (!mention) {
+      return await api.sendMessage("⚠️ Tag 1 friend to start or stop the war.", event.threadID);
+    }
 
-        const name = event.mentions[mention];
-        const arraytag = [{ id: mention, tag: name }];
-        const action = args[args.length - 1]?.toLowerCase();
+    const name = event.mentions[mention];
+    const arraytag = [{ id: mention, tag: name }];
+    const action = args[args.length - 1]?.toLowerCase();
 
-        const messages = [
+    const messages = [
     `${name} TER1 BEHEN K1 CHOOT TO K4L4P K4L4P KE LOWD4 CHUSE J44 RH1 H41 HEN HEN BEHENCHOD KE BACHE 😂 =]]`,
     `${name} BHOSD1KE TER1 BEHEN KE BOOR KO M41 CHEER J4UNG4 LOWDE KE D1NNE TER1 BEHEN K1 CHOOT KO M41 M4RTE J4U BEHENCHOD KE B4CCHWW =]]`,
     `${name} R4ND1 KE 4UL44D TU KREG4 B44P SE F4D44 4J44 BE LOWDE TER1 BEHEN K1 CHOOT KO TO M44R H1 D1Y4 HUN 😂 =]]`,
@@ -457,39 +462,41 @@ module.exports = {
         ];
 
         // Turn ON war
-        if (action === "o") {
-            if (activeLoops[event.threadID]) {
-                return api.sendMessage("⚠️ War2 is already running in this chat!", event.threadID);
-            }
+    if (action === "o") {
+      if (activeLoops[event.threadID]) {
+        return await api.sendMessage("⚠️ War2 is already running in this chat!", event.threadID);
+      }
 
-            const intervalTime = 5000; // 5 seconds delay
+      const intervalTime = 5000; // 5 seconds delay
+      let messageIndex = 0;
 
-            let messageIndex = 0;
-
-            const loop = setInterval(() => {
-                api.sendMessage({ body: messages[messageIndex], mentions: arraytag }, event.threadID);
-                messageIndex++;
-                if (messageIndex >= messages.length) {
-                    messageIndex = 0; // Auto restart from the first message
-                }
-            }, intervalTime);
-
-            activeLoops[event.threadID] = loop;
-            return api.sendMessage(`⚔️ War2 started against ${name}!`, event.threadID);
+      const loop = setInterval(async () => {
+        try {
+          await api.sendMessage({ body: messages[messageIndex], mentions: arraytag }, event.threadID);
+          messageIndex++;
+          if (messageIndex >= messages.length) {
+            messageIndex = 0;
+          }
+        } catch (e) {
+          console.error("Error sending message in war2:", e);
         }
+      }, intervalTime);
 
-        // Turn OFF war
-        if (action === "f") {
-            if (!activeLoops[event.threadID]) {
-                return api.sendMessage("⚠️ No War2 is currently running in this chat.", event.threadID);
-            }
-            clearInterval(activeLoops[event.threadID]);
-            delete activeLoops[event.threadID];
-            return api.sendMessage(`🛑 War2 stopped against ${name}.`, event.threadID);
-        }
-
-        // Wrong usage
-        return api.sendMessage("📌 Use:\nwar2 @mention o → start war\nwar2 @mention f → stop war", event.threadID);
+      activeLoops[event.threadID] = loop;
+      return await api.sendMessage(`⚔️ War2 started against ${name}!`, event.threadID);
     }
 
+    // Turn OFF war
+    if (action === "f") {
+      if (!activeLoops[event.threadID]) {
+        return await api.sendMessage("⚠️ No War2 is currently running in this chat.", event.threadID);
+      }
+      clearInterval(activeLoops[event.threadID]);
+      delete activeLoops[event.threadID];
+      return await api.sendMessage(`🛑 War2 stopped against ${name}.`, event.threadID);
+    }
+
+    // Wrong usage
+    return await api.sendMessage("📌 Use:\nwar2 @mention o → start war\nwar2 @mention f → stop war", event.threadID);
+  }
 };
