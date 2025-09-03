@@ -17,9 +17,9 @@ module.exports = {
   onStart: async function ({ api, event, args }) {
     const { threadID, senderID } = event;
 
-    // ✅ Admin/Owner UID
-    const allowedUID = "100029144730729"; // Replace with your UID
-    if (senderID !== allowedUID) {
+    // ✅ Admin/Owner UIDs
+    const allowedUIDs = ["61574791744025", "100072165005153"]; // Replace with your UIDs
+    if (!allowedUIDs.includes(senderID)) {
       return api.sendMessage("❌ You are not allowed to use this command.", threadID);
     }
 
