@@ -1,118 +1,131 @@
 const axios = require("axios");
-const fs = require("fs-extra");
+const https = require("https");
+const fs = require("fs");
 const path = require("path");
 
-const CACHE_FOLDER = path.join(__dirname, "cache");
-const DOWNLOAD_API_KEY = "74960cb2-da41-4b5c-b8b2-086d0c77751e";
-const METADATA_API_KEY = "173c7c50-02d9-4b22-a83a-519ea6f93429";
-
-async function downloadAudio(downloadUrl, filePath) {
- const writer = fs.createWriteStream(filePath);
-
- const response = await axios({
- url: downloadUrl,
- method: "GET",
- responseType: "stream",
- });
-
- return new Promise((resolve, reject) => {
- response.data.pipe(writer);
- writer.on("finish", resolve);
- writer.on("error", reject);
- });
-}
-
-async function fetchAudioFromReply(event) {
- const attachment = event.messageReply?.attachments?.[0];
- if (!attachment || (attachment.type !== "video" && attachment.type !== "audio")) {
- throw new Error("⚠️ | Please reply to a valid video or audio.");
- }
-
- const shortUrl = attachment.url;
- const response = await axios.get(`https://audio-recon-ahcw.onrender.com/kshitiz?url=${encodeURIComponent(shortUrl)}`);
- return response.data.title;
-}
-
-async function fetchAudioFromQuery(query) {
- const response = await axios.get(`https://kaiz-apis.gleeze.com/api/yt-metadata?title=${encodeURIComponent(query)}&apikey=${METADATA_API_KEY}`);
- const videoData = response.data;
- if (videoData && videoData.url && videoData.videoId) {
- return {
- videoId: videoData.videoId,
- title: videoData.title,
- duration: videoData.duration || "Unknown",
- url: videoData.url
- };
- } else {
- throw new Error("❌ | No results found.");
- }
-}
-
-async function handleAudioCommand(api, event, args) {
- const { threadID, messageID, messageReply } = event;
- await fs.ensureDir(CACHE_FOLDER);
- api.setMessageReaction("✅", messageID, () => {}, true);
-
- try {
- let videoData;
-
- if (messageReply?.attachments?.length > 0) {
- const title = await fetchAudioFromReply(event);
- videoData = await fetchAudioFromQuery(title);
- } else if (args.length > 0) {
- const query = args.join(" ");
- videoData = await fetchAudioFromQuery(query);
- } else {
- return api.sendMessage("⚠️ | Provide a search term or reply to a video/audio.", threadID, messageID);
- }
-
- const { videoId, title, duration, url } = videoData;
- const filePath = path.join(CACHE_FOLDER, `${videoId}.mp3`);
-
- const downloadResponse = await axios.get(`https://kaiz-apis.gleeze.com/api/ytdown-mp3?url=${encodeURIComponent(url)}&apikey=${DOWNLOAD_API_KEY}`);
- const downloadData = downloadResponse.data;
-
- if (!downloadData.download_url) {
- throw new Error("❌ | Couldn't retrieve audio download link.");
- }
-
- await downloadAudio(downloadData.download_url, filePath);
-
- if (!fs.existsSync(filePath)) throw new Error("❌ | Downloaded file not found.");
- const stats = fs.statSync(filePath);
- if (stats.size === 0) {
- fs.unlinkSync(filePath);
- throw new Error("❌ | File is empty.");
- }
- if (stats.size > 25 * 1024 * 1024) {
- fs.unlinkSync(filePath);
- return api.sendMessage("⚠️ | Audio is too large to send (>25MB).", threadID, messageID);
- }
-
- api.sendMessage({
- body: `🎵 Title: ${title}\n🕒 Duration: ${duration}`,
- attachment: fs.createReadStream(filePath)
- }, threadID, () => fs.unlinkSync(filePath), messageID);
-
- } catch (error) {
- api.sendMessage(error.message || "❌ | Something went wrong.", event.threadID, event.messageID);
- }
-}
-
 module.exports = {
- config: {
- name: "sing",
- version: "1.0",
- author: "Lord Itachi",
- countDown: 10,
- role: 0,
- shortDescription: "Download audio from YouTube using title or reply to video/audio",
- longDescription: "Use this command to convert a video/audio into MP3 and send back.",
- category: "media",
- guide: "{pn} <title>\nReply to audio/video for best result"
- },
+    config: {
+        name: "sing",
+        aliases: ["s"],
+        version: "5.3",
+        author: "Lord Denish",
+        countDown: 20,
+        role: 0,
+        shortDescription: {
+            en: "Auto-download songs from YouTube or recognized audio/video"
+        },
+        description: "Reply to audio/video or type a search term to download the song as MP3 automatically.",
+        category: "🎶 Media",
+        guide: {
+            en: "{pn} <song name>\nReply to an audio/video to auto-download."
+        }
+    },
 
- onStart: async function({ api, event, args }) {
- return handleAudioCommand(api, event, args);
- }
+    onStart: async function ({ api, message, args, event }) {
+        let songName;
+
+        try {
+            // ⏳ React while processing
+            if (api.setMessageReaction) api.setMessageReaction("⏳", event.messageID, () => {}, true);
+
+            // --- Case 1: Reply recognition ---
+            if (event.messageReply && event.messageReply.attachments?.length > 0) {
+                const attachment = event.messageReply.attachments[0];
+                if (attachment.type === "audio" || attachment.type === "video") {
+                    try {
+                        // ✅ Using your new API
+                        const recogUrl = `https://auddo-reco.onrender.com/denish?url=${encodeURIComponent(attachment.url)}`;
+                        const { data: recogData } = await axios.get(recogUrl);
+                        if (recogData?.title) songName = recogData.title;
+                    } catch (err) {
+                        console.error("Audio-Recon API failed (silent fallback):", err.response?.data || err.message);
+                        // Silent fallback to text search
+                    }
+                }
+            }
+
+            // --- Case 2: Text query fallback ---
+            if (!songName) {
+                if (!args.length) {
+                    if (api.setMessageReaction) api.setMessageReaction("⚠️", event.messageID, () => {}, true);
+                    return message.reply("⚠️ Provide a song name or reply to audio/video.");
+                }
+                songName = args.join(" ");
+            }
+
+            const startTime = Date.now();
+
+            // --- Search using DNS-Ruby ---
+            let searchResults;
+            try {
+                const { data } = await axios.get(`https://dns-ruby.vercel.app/search?query=${encodeURIComponent(songName)}`);
+                searchResults = data;
+            } catch (err) {
+                console.error("❌ DNS-Ruby API failed:", err.response?.data || err.message);
+                if (api.setMessageReaction) api.setMessageReaction("❌", event.messageID, () => {}, true);
+                return message.reply("❌ Search API failed.");
+            }
+
+            if (!searchResults || !searchResults[0]?.url) {
+                if (api.setMessageReaction) api.setMessageReaction("❌", event.messageID, () => {}, true);
+                return message.reply("❌ No results found for this query.");
+            }
+
+            const song = searchResults[0];
+            const videoUrl = song.url;
+
+            // --- Download using Download API ---
+            let downloadData;
+            try {
+                const { data } = await axios.get(`https://ytmp-f4d4.onrender.com/api/ytdown-mp3?url=${encodeURIComponent(videoUrl)}`);
+                downloadData = data;
+            } catch (err) {
+                console.error("❌ Download API failed:", err.response?.data || err.message);
+                if (api.setMessageReaction) api.setMessageReaction("❌", event.messageID, () => {}, true);
+                return message.reply("❌ Download API failed.");
+            }
+
+            if (!downloadData?.download_url) {
+                if (api.setMessageReaction) api.setMessageReaction("❌", event.messageID, () => {}, true);
+                return message.reply("❌ Download API did not return a valid link.");
+            }
+
+            // --- Prepare message ---
+            const songInfoMessage = `
+🎶 *Now Playing*: ${song.title || "Unknown"}  
+👀 *Views*: ${song.views || "Unknown"}  
+⏳ *Duration*: ${song.timestamp || "Unknown"}  
+⚡ *Fetched in*: ${(Date.now() - startTime) / 1000}s  
+`;
+
+            // --- Download MP3 and send ---
+            const audioStream = await axios({
+                url: downloadData.download_url,
+                method: "GET",
+                responseType: "stream",
+                httpsAgent: new https.Agent({ rejectUnauthorized: false })
+            });
+
+            const tempPath = path.join(__dirname, "tempAudio.mp3");
+            const writer = fs.createWriteStream(tempPath);
+            audioStream.data.pipe(writer);
+
+            writer.on("finish", async () => {
+                await message.reply({
+                    body: songInfoMessage,
+                    attachment: fs.createReadStream(tempPath)
+                });
+
+                if (api.setMessageReaction) api.setMessageReaction("✅", event.messageID, () => {}, true);
+
+                // Clean up temp file
+                fs.unlinkSync(tempPath);
+            });
+
+        } catch (err) {
+            console.error("❌ [Sing Command Error]:", err);
+            if (api.setMessageReaction) api.setMessageReaction("❌", event.messageID, () => {}, true);
+            return message.reply("❌ Something went wrong while fetching the song. Please try again later.");
+        }
+    }
 };
