@@ -1,12 +1,12 @@
-const { getTime, drive } = global.utils;
+const { getTime, drive, getStreamFromURL } = global.utils;
 if (!global.temp.welcomeEvent)
 	global.temp.welcomeEvent = {};
 
 module.exports = {
 	config: {
 		name: "welcome",
-		version: "1.7",
-		author: "NTKhang",
+		version: "1.9",
+		author: "NTKhang + Edited by Axshu",
 		category: "events"
 	},
 
@@ -41,25 +41,35 @@ module.exports = {
 				const { nickNameBot } = global.GoatBot.config;
 				const prefix = global.utils.getPrefix(threadID);
 				const dataAddedParticipants = event.logMessageData.addedParticipants;
+
 				// if new member is bot
 				if (dataAddedParticipants.some((item) => item.userFbId == api.getCurrentUserID())) {
 					if (nickNameBot)
 						api.changeNickname(nickNameBot, threadID, api.getCurrentUserID());
-					return message.send(getLang("welcomeMessage", prefix));
+
+					// Default welcome text
+					const body = getLang("welcomeMessage", prefix);
+
+					// Fixed video link (Google Drive direct download)
+					const videoUrl = "https://drive.google.com/uc?export=download&id=1-CahSHdD-2IEwt3Qxg0-Q7cDjIHFwvG_";
+
+					// Send text + video together
+					return message.send({
+						body,
+						attachment: [await getStreamFromURL(videoUrl)]
+					});
 				}
-				// if new member:
+
+				// if new member (not bot)
 				if (!global.temp.welcomeEvent[threadID])
 					global.temp.welcomeEvent[threadID] = {
 						joinTimeout: null,
 						dataAddedParticipants: []
 					};
 
-				// push new member to array
 				global.temp.welcomeEvent[threadID].dataAddedParticipants.push(...dataAddedParticipants);
-				// if timeout is set, clear it
 				clearTimeout(global.temp.welcomeEvent[threadID].joinTimeout);
 
-				// set new timeout
 				global.temp.welcomeEvent[threadID].joinTimeout = setTimeout(async function () {
 					const threadData = await threadsData.get(threadID);
 					if (threadData.settings.sendWelcomeMessage == false)
@@ -67,8 +77,7 @@ module.exports = {
 					const dataAddedParticipants = global.temp.welcomeEvent[threadID].dataAddedParticipants;
 					const dataBanned = threadData.data.banned_ban || [];
 					const threadName = threadData.threadName;
-					const userName = [],
-						mentions = [];
+					const userName = [], mentions = [];
 					let multiple = false;
 
 					if (dataAddedParticipants.length > 1)
@@ -78,42 +87,29 @@ module.exports = {
 						if (dataBanned.some((item) => item.id == user.userFbId))
 							continue;
 						userName.push(user.fullName);
-						mentions.push({
-							tag: user.fullName,
-							id: user.userFbId
-						});
+						mentions.push({ tag: user.fullName, id: user.userFbId });
 					}
-					// {userName}:   name of new member
-					// {multiple}:
-					// {boxName}:    name of group
-					// {threadName}: name of group
-					// {session}:    session of day
 					if (userName.length == 0) return;
-					let { welcomeMessage = getLang("defaultWelcomeMessage") } =
-						threadData.data;
+
+					let { welcomeMessage = getLang("defaultWelcomeMessage") } = threadData.data;
 					const form = {
 						mentions: welcomeMessage.match(/\{userNameTag\}/g) ? mentions : null
 					};
+
 					welcomeMessage = welcomeMessage
 						.replace(/\{userName\}|\{userNameTag\}/g, userName.join(", "))
 						.replace(/\{boxName\}|\{threadName\}/g, threadName)
-						.replace(
-							/\{multiple\}/g,
-							multiple ? getLang("multiple2") : getLang("multiple1")
-						)
-						.replace(
-							/\{session\}/g,
-							hours <= 10
-								? getLang("session1")
-								: hours <= 12
-									? getLang("session2")
-									: hours <= 18
-										? getLang("session3")
+						.replace(/\{multiple\}/g, multiple ? getLang("multiple2") : getLang("multiple1"))
+						.replace(/\{session\}/g,
+							hours <= 10 ? getLang("session1")
+								: hours <= 12 ? getLang("session2")
+									: hours <= 18 ? getLang("session3")
 										: getLang("session4")
 						);
 
 					form.body = welcomeMessage;
 
+					// Attachments for new members
 					if (threadData.data.welcomeAttachment) {
 						const files = threadData.data.welcomeAttachment;
 						const attachments = files.reduce((acc, file) => {
@@ -124,6 +120,7 @@ module.exports = {
 							.filter(({ status }) => status == "fulfilled")
 							.map(({ value }) => value);
 					}
+
 					message.send(form);
 					delete global.temp.welcomeEvent[threadID];
 				}, 1500);
