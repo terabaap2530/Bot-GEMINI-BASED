@@ -1,66 +1,57 @@
 const axios = require("axios");
-
-const timers = new Map(); // store timers per thread
+const fs = require("fs");
+const path = require("path");
+const { pipeline } = require("stream");
+const { promisify } = require("util");
+const streamPipeline = promisify(pipeline);
 
 module.exports = {
   config: {
     name: "anime",
     aliases: ["ae"],
     author: "Denish",
-    version: "1.0",
+    version: "1.1",
     cooldowns: 5,
     role: 0,
-    shortDescription: "Get random anime videos",
-    longDescription: "Send a random anime video from the API. Timer option available.",
+    shortDescription: "Get random anime video",
+    longDescription: "Fetches a random anime video from ran-animw API",
     category: "fun",
-    guide: "{pn} or {pn} on/off\nExample: anime on → send random anime every 10 minutes."
+    guide: "{p}anime"
   },
 
-  onStart: async function({ api, event, message, args }) {
-    const threadID = event.threadID;
+  onStart: async function ({ api, event }) {
+    const url = "https://ran-animw.vercel.app/api/denish";
 
-    // check if user wants timer
-    const subCommand = args[0]?.toLowerCase();
-
-    // 🔹 Timer ON
-    if (subCommand === "on") {
-      if (timers.has(threadID)) {
-        return message.reply("⏱ Timer is already ON for this chat.");
-      }
-
-      const sendAnime = async () => {
-        try {
-          const res = await axios.get("https://ran-animw.onrender.com/denish-random", { responseType: "stream" });
-          await message.reply({ attachment: res.data });
-        } catch (err) {
-          console.error("❌ Failed to fetch anime video:", err.message);
-        }
-      };
-
-      // send immediately
-      await sendAnime();
-
-      // set interval every 10 minutes
-      const interval = setInterval(sendAnime, 10 * 60 * 1000); 
-      timers.set(threadID, interval);
-      return message.reply("✅ Timer ON: will send random anime video every 10 minutes.");
-    }
-
-    // 🔹 Timer OFF
-    if (subCommand === "off") {
-      if (!timers.has(threadID)) return message.reply("⚠️ Timer is already OFF.");
-      clearInterval(timers.get(threadID));
-      timers.delete(threadID);
-      return message.reply("⏹ Timer OFF: no more automatic anime videos.");
-    }
-
-    // 🔹 Normal command: send 1 random anime video
     try {
-      const res = await axios.get("https://ran-animw.onrender.com/denish-random", { responseType: "stream" });
-      await message.reply({ attachment: res.data });
-    } catch (err) {
-      console.error("❌ Failed to fetch anime video:", err.message);
-      return message.reply("❌ Something went wrong while fetching anime video.");
+      // React while fetching
+      api.setMessageReaction("⏳", event.messageID, () => {}, true);
+
+      const response = await axios({
+        url,
+        method: "GET",
+        responseType: "stream",
+        timeout: 15000
+      });
+
+      const videoPath = path.join(__dirname, "cache", `anime_${Date.now()}.mp4`);
+      await streamPipeline(response.data, fs.createWriteStream(videoPath));
+
+      // Send video
+      await api.sendMessage(
+        { body: "✨ Here's your anime!", attachment: fs.createReadStream(videoPath) },
+        event.threadID,
+        () => {
+          fs.unlinkSync(videoPath);
+          // React after success
+          api.setMessageReaction("✅", event.messageID, () => {}, true);
+        },
+        event.messageID
+      );
+
+    } catch (e) {
+      console.error(e);
+      api.sendMessage("❌ Failed to fetch anime video.", event.threadID, event.messageID);
+      api.setMessageReaction("⚠️", event.messageID, () => {}, true);
     }
   }
 };
