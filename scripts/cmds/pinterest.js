@@ -30,7 +30,8 @@ module.exports = {
       if (amount > 70) amount = 70; // max 70 images
     }
 
-    const apiUrl = `https://www.bhandarimilan.info.np/api/pinterest?query=${encodeURIComponent(query)}`;
+    // 🔥 Updated API URL
+    const apiUrl = `https://pin-api-itachi.vercel.app/api/pinterest?q=${encodeURIComponent(query)}`;
 
     try {
       const res = await axios.get(apiUrl);
