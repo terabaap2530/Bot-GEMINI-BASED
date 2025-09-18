@@ -30,7 +30,9 @@ module.exports = {
       // Random Pinterest keywords
       const keywords = ["anime boy", "anime girl", "nature", "cyberpunk", "aesthetic", "wallpaper", "meme", "cool art"];
       const randomKeyword = keywords[Math.floor(Math.random() * keywords.length)];
-      const pinRes = await axios.get(`https://www.bhandarimilan.info.np/api/pinterest?query=${encodeURIComponent(randomKeyword)}`);
+
+      // 🔥 Updated API URL
+      const pinRes = await axios.get(`https://pin-api-itachi.vercel.app/api/pinterest?q=${encodeURIComponent(randomKeyword)}`);
       const imageUrl = pinRes.data?.data?.[0] || null;
 
       // Case 1: Show full help list
