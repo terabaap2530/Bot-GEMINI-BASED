@@ -10,7 +10,7 @@ module.exports = {
     name: "anime",
     aliases: ["ae"],
     author: "Denish",
-    version: "1.1",
+    version: "1.3",
     cooldowns: 5,
     role: 0,
     shortDescription: "Get random anime video",
@@ -26,30 +26,37 @@ module.exports = {
       // React while fetching
       api.setMessageReaction("⏳", event.messageID, () => {}, true);
 
+      // Make sure cache folder exists
+      const cacheDir = path.join(__dirname, "cache");
+      if (!fs.existsSync(cacheDir)) fs.mkdirSync(cacheDir);
+
+      const videoPath = path.join(cacheDir, `anime_${Date.now()}.mp4`);
+
+      // Fetch video stream
       const response = await axios({
         url,
         method: "GET",
         responseType: "stream",
-        timeout: 15000
+        timeout: 60000, // 1 min timeout for bigger files
+        headers: { "User-Agent": "Mozilla/5.0" } // avoid blocks
       });
 
-      const videoPath = path.join(__dirname, "cache", `anime_${Date.now()}.mp4`);
+      // Save file
       await streamPipeline(response.data, fs.createWriteStream(videoPath));
 
-      // Send video
+      // Send file
       await api.sendMessage(
         { body: "✨ Here's your anime!", attachment: fs.createReadStream(videoPath) },
         event.threadID,
         () => {
-          fs.unlinkSync(videoPath);
-          // React after success
+          fs.unlinkSync(videoPath); // delete after sending
           api.setMessageReaction("✅", event.messageID, () => {}, true);
         },
         event.messageID
       );
 
     } catch (e) {
-      console.error(e);
+      console.error("Anime cmd error:", e);
       api.sendMessage("❌ Failed to fetch anime video.", event.threadID, event.messageID);
       api.setMessageReaction("⚠️", event.messageID, () => {}, true);
     }
