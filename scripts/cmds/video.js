@@ -1,100 +1,86 @@
 const axios = require("axios");
+const https = require("https");
 const fs = require("fs");
 const path = require("path");
-
-const YT_SEARCH_API = "https://dns-pxx0.onrender.com/search?query=";
-const MINATO_DOWNLOAD_API_BASE = "https://youtube-minato-lamda.vercel.app/api/download?videoId=";
-
-async function downloadFile(url, filepath) {
-  const writer = fs.createWriteStream(filepath);
-  const response = await axios({
-    url,
-    method: "GET",
-    responseType: "stream",
-  });
-  response.data.pipe(writer);
-  return new Promise((resolve, reject) => {
-    writer.on("finish", resolve);
-    writer.on("error", reject);
-  });
-}
+const { pipeline } = require("stream");
+const { promisify } = require("util");
+const streamPipeline = promisify(pipeline);
 
 module.exports = {
   config: {
     name: "video",
-    version: "1.5",
+    aliases: ["v"],
+    version: "2.0",
     author: "Lord Denish",
-    shortDescription: { en: "Search YouTube and download full video" },
-    longDescription: { en: "Uses search API + Minato Lambda download API for full videos." },
-    category: "media",
-    guide: "{pn} <search term or YouTube URL>",
+    countDown: 20,
+    role: 0,
+    shortDescription: { en: "Download YouTube videos as MP4" },
+    description: "Search or provide a YouTube link and auto-download video as MP4.",
+    category: "🎬 Media",
+    guide: { en: "{pn} <video name or YouTube URL>" }
   },
 
-  onStart: async function ({ message, args }) {
-    if (args.length === 0) return message.reply("❌ Please provide a YouTube video URL or search term.");
+  onStart: async function ({ api, message, args, event }) {
+    if (api.setMessageReaction) api.setMessageReaction("⏳", event.messageID, () => {}, true);
+
+    const safeReply = async (text) => {
+      try { await message.reply(text); } catch (e) { console.error("Failed to send reply:", e); }
+    };
 
     try {
+      if (!args.length) {
+        if (api.setMessageReaction) api.setMessageReaction("⚠️", event.messageID, () => {}, true);
+        return safeReply("⚠️ Provide a YouTube link or search term.");
+      }
+
       const query = args.join(" ");
-      let videoId = "";
-      let videoTitle = "";
 
-      // Ensure cache folder exists
-      const cacheDir = path.join(__dirname, "cache");
-      if (!fs.existsSync(cacheDir)) fs.mkdirSync(cacheDir);
+      // ✅ Use your new API
+      const { data } = await axios.get(
+        `https://dens-videojs.vercel.app/api/video?query=${encodeURIComponent(query)}`
+      );
 
-      // Check if input is direct YouTube URL
-      const ytIdMatch = query.match(/(?:v=|\/)([a-zA-Z0-9_-]{11})/);
-      if (ytIdMatch) {
-        videoId = ytIdMatch[1];
-      } else {
-        // Search YouTube via API
-        const searchRes = await axios.get(YT_SEARCH_API + encodeURIComponent(query));
-        const results = searchRes.data;
-        console.log("🔍 Search API response:", results);
-
-        if (!results || results.length === 0) return message.reply("❌ No videos found for your search.");
-
-        videoId = results[0].videoId || results[0].videoIdShort || "";
-        videoTitle = results[0].title || "YouTube Video";
+      if (!data?.status || !data?.result?.mp4) {
+        if (api.setMessageReaction) api.setMessageReaction("❌", event.messageID, () => {}, true);
+        return safeReply("❌ No video found.");
       }
 
-      if (!videoId) return message.reply("❌ Could not find video ID from your input.");
+      const downloadUrl = data.result.mp4;
+      const title = data.result.title;
 
-      // Fetch download info from Minato API
-      const downloadRes = await axios.get(MINATO_DOWNLOAD_API_BASE + encodeURIComponent(videoId));
-      console.log("📥 Minato API response:", downloadRes.data);
+      // ✅ Download video
+      const tempFileName = `video_${Date.now()}.mp4`;
+      const tempPath = path.join(__dirname, tempFileName);
 
-      const streams = downloadRes.data.downloadResult?.response || {};
-      const availableStreams = Object.values(streams).filter(v => v?.download_url);
+      const videoResponse = await axios({
+        method: "get",
+        url: downloadUrl,
+        responseType: "stream",
+        httpsAgent: new https.Agent({ rejectUnauthorized: false }),
+        headers: {
+          "User-Agent": "Mozilla/5.0",
+          "Referer": "https://www.youtube.com/",
+          "Accept": "*/*"
+        },
+        maxContentLength: Infinity,
+        maxBodyLength: Infinity,
+        timeout: 180000
+      });
 
-      if (availableStreams.length === 0) return message.reply("❌ No downloadable video URL found.");
+      await streamPipeline(videoResponse.data, fs.createWriteStream(tempPath));
 
-      const videoData = availableStreams[0];
-      const directVideoUrl = videoData.download_url;
-      const finalTitle = videoTitle || videoData.title || "YouTube Video";
+      // ✅ Send video
+      await message.reply({ body: `🎬 ${title}`, attachment: fs.createReadStream(tempPath) });
 
-      const ext = directVideoUrl.includes(".mp3") ? ".mp3" : ".mp4";
-      const tempFilePath = path.join(cacheDir, `video_${Date.now()}${ext}`);
-
-      // Download video file
-      await downloadFile(directVideoUrl, tempFilePath);
-
-      // Check file size
-      const stats = fs.statSync(tempFilePath);
-      if (stats.size < 100000) {
-        fs.unlinkSync(tempFilePath);
-        return message.reply("❌ Downloaded file is too small, something went wrong.");
-      }
-
-      // Send **only one message** with video and title
-      await message.reply({ body: `🎬 ${finalTitle}`, attachment: fs.createReadStream(tempFilePath) });
+      if (api.setMessageReaction) api.setMessageReaction("✅", event.messageID, () => {}, true);
 
       // Cleanup
-      fs.unlinkSync(tempFilePath);
+      try { fs.unlinkSync(tempPath); } catch {}
 
-    } catch (error) {
-      console.error("❌ Error in video command:", error.response?.data || error.message || error);
-      return message.reply("❌ An error occurred while processing your request.");
+    } catch (err) {
+      console.error("❌ [Video Command Error]:", err && (err.stack || err.message || err));
+      if (api.setMessageReaction) api.setMessageReaction("❌", event.messageID, () => {}, true);
+      return safeReply("❌ Something went wrong while fetching the video.");
     }
-  },
+  }
 };
