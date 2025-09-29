@@ -9,7 +9,7 @@ module.exports = {
   config: {
     name: "uptime2",
     aliases: ["upt", "botstatus"],
-    version: "2.4",
+    version: "2.5",
     author: "Lord Denish",
     role: 0,
     shortDescription: { en: "Bot uptime, stats & system info with Robin theme." },
@@ -153,4 +153,11 @@ function formatUptime(seconds) {
 
 function getDiskUsage() {
   try {
-    const stdout = execSync("df -h /").
+    const stdout = execSync("df -h /").toString();
+    const lines = stdout.trim().split("\n");
+    const parts = lines[1].split(/\s+/);
+    return { total: parts[1], used: parts[2], available: parts[3] };
+  } catch {
+    return { total: "N/A", used: "N/A", available: "N/A" };
+  }
+    }
