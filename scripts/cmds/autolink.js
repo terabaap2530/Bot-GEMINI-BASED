@@ -3,31 +3,29 @@ const fs = require("fs");
 const path = require("path");
 const { parse } = require("url");
 
-// Map hostnames to Universal Downloader API endpoints
+// Map hostnames to API endpoints
 const PLATFORM_API_MAP = {
     "instagram": "/api/meta/download",
     "facebook": "/api/meta/download",
-    "tiktok": "/api/tiktok/download",
-    "youtube": "/api/youtube/download",
+    "youtube": "https://yt-dl-mp4.vercel.app/api/ytmp4?url=", // Your YouTube API
     "reddit": "/api/reddit/download",
     "pinterest": "/api/pinterest/download",
     "threads": "/api/threads/download",
     "linkedin": "/api/linkedin/download",
     "twitter": "/api/twitter/download",
-    "x.com": "/api/twitter/download"
+    "x.com": "/api/twitter/download",
+    "tiktok": "https://tiktok-dl-kappa-jade.vercel.app/api/tiktok?url=" // Your TikTok API
 };
 
-// Helper to expand short TikTok links
+// Expand short TikTok links
 async function expandTikTokUrl(shortUrl) {
     try {
         const res = await axios.get(shortUrl, {
             maxRedirects: 0,
-            validateStatus: (status) => status >= 200 && status < 400
+            validateStatus: status => status >= 200 && status < 400
         });
-        if (res.status === 301 || res.status === 302) {
-            return res.headers.location;
-        }
-        return shortUrl; // already full link
+        if (res.status === 301 || res.status === 302) return res.headers.location;
+        return shortUrl;
     } catch (err) {
         if (err.response && (err.response.status === 301 || err.response.status === 302)) {
             return err.response.headers.location;
@@ -39,12 +37,12 @@ async function expandTikTokUrl(shortUrl) {
 module.exports = {
     config: {
         name: "autolink",
-        version: "8.2",
+        version: "8.4",
         author: "Lord Denish",
         countDown: 5,
         role: 0,
         shortDescription: "Auto-download videos from multiple platforms",
-        longDescription: "Detects video links and downloads automatically using Universal Downloader API.",
+        longDescription: "Detects video links and downloads automatically using multiple APIs.",
         category: "media",
         guide: "Send any supported video link in chat."
     },
@@ -63,7 +61,7 @@ module.exports = {
             // React ⏳ for download started
             api.setMessageReaction("⏳", event.messageID, () => {}, true);
 
-            // Expand TikTok short link if needed
+            // Expand TikTok short link
             if (hostname.includes("tiktok") && url.includes("vt.tiktok.com")) {
                 url = await expandTikTokUrl(url);
                 hostname = parse(url).hostname.toLowerCase();
@@ -79,11 +77,18 @@ module.exports = {
             }
             if (!apiEndpoint) return; // Unsupported platform
 
-            const apiUrl = `https://universaldownloaderapi.vercel.app${apiEndpoint}?url=${encodeURIComponent(url)}`;
+            // Build API URL
+            let apiUrl;
+            if (apiEndpoint.startsWith("http")) {
+                apiUrl = `${apiEndpoint}${encodeURIComponent(url)}`; // Custom API
+            } else {
+                apiUrl = `https://universaldownloaderapi.vercel.app${apiEndpoint}?url=${encodeURIComponent(url)}`;
+            }
+
             const res = await axios.get(apiUrl, { timeout: 30000 });
             const data = res.data;
 
-            // Determine the correct video URL depending on platform
+            // Determine video URL
             let videoUrl = null;
 
             if (hostname.includes("instagram") || hostname.includes("facebook") || hostname.includes("meta")) {
@@ -92,14 +97,15 @@ module.exports = {
                 }
             } 
             else if (hostname.includes("tiktok")) {
-                if (data?.success && data?.data?.video_no_watermark?.url) {
-                    videoUrl = data.data.video_no_watermark.url;
-                } else if (data?.success && data?.data?.video_watermark?.url) {
-                    videoUrl = data.data.video_watermark.url;
+                if (data?.status && data?.data?.meta?.media?.length > 0) {
+                    const media = data.data.meta.media[0];
+                    videoUrl = media.hd || media.org || null;
                 }
             } 
-            else if (hostname.includes("youtube") && data?.download_url) {
-                videoUrl = data.download_url;
+            else if (hostname.includes("youtube")) {
+                if (data?.status && data?.result?.status && data?.result?.mp4) {
+                    videoUrl = data.result.mp4;
+                }
             } 
             else if ((hostname.includes("reddit") || hostname.includes("twitter") || hostname.includes("x.com")) && data?.data?.[0]?.video_url) {
                 videoUrl = data.data[0].video_url;
@@ -131,28 +137,17 @@ module.exports = {
                 writer.on("error", reject);
             });
 
-            // Size check (100MB)
-            const fileSizeMB = fs.statSync(filePath).size / (1024 * 1024);
-            if (fileSizeMB > 100) {
-                fs.unlinkSync(filePath);
-                api.setMessageReaction("💔", event.messageID, () => {}, true);
-                return;
-            }
+            // React ✅ when finished
+            api.setMessageReaction("✅", event.messageID, () => {}, true);
 
-            // Send video and react ✅
-            await api.sendMessage(
-                { attachment: fs.createReadStream(filePath) },
-                event.threadID,
-                (err) => {
-                    fs.unlinkSync(filePath);
-                    if (err) api.setMessageReaction("💔", event.messageID, () => {}, true);
-                    else api.setMessageReaction("✅", event.messageID, () => {}, true);
-                },
-                event.messageID
-            );
+            // Send file
+            api.sendMessage({ attachment: fs.createReadStream(filePath) }, event.threadID, () => {
+                // Delete cached file after sending
+                fs.unlinkSync(filePath);
+            }, event.messageID);
 
         } catch (err) {
-            console.error("AutoLink Error:", err.message || err);
+            console.error(err);
             api.setMessageReaction("💔", event.messageID, () => {}, true);
         }
     }
