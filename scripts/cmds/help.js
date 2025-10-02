@@ -6,7 +6,7 @@ module.exports = {
   config: {
     name: "help",
     version: "2.0",
-    author: "Lord Denish (merged from NTKhang + BhandariMilan API)",
+    author: "Lord Denish (merged from NTKhang)",
     role: 0,
     shortDescription: "Show bot commands",
     longDescription: "Displays all commands with Pinterest image and uptime",
@@ -28,11 +28,11 @@ module.exports = {
       const uptimeStr = `${hours}h ${minutes}m ${seconds}s`;
 
       // Random Pinterest keywords
-      const keywords = ["anime boy", "anime girl", "nature", "cyberpunk", "aesthetic", "wallpaper", "meme", "cool art"];
+      const keywords = ["uriyu", "orihime", "ichigo", "boahancock", "zoro", "SWALLOWEDSTAR", "LUFFY", "Aizen"];
       const randomKeyword = keywords[Math.floor(Math.random() * keywords.length)];
 
       // 🔥 Updated API URL
-      const pinRes = await axios.get(`https://pin-api-itachi.vercel.app/api/pinterest?q=${encodeURIComponent(randomKeyword)}`);
+      const pinRes = await axios.get(`https://denish-pin.vercel.app/api/search-download?query=${encodeURIComponent(randomKeyword)}`);
       const imageUrl = pinRes.data?.data?.[0] || null;
 
       // Case 1: Show full help list
