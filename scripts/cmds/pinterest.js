@@ -4,12 +4,12 @@ module.exports = {
   config: {
     name: "pinterest",
     aliases: ["pin", "pins"],
-    version: "1.5",
+    version: "2.0",
     author: "Lord Denish",
     countDown: 5,
     role: 0,
     shortDescription: "Get Pinterest images",
-    longDescription: "Fetch up to 70 Pinterest images using your API",
+    longDescription: "Fetch up to 70 Pinterest images using your custom API",
     category: "fun",
     guide: {
       en: "{p}pinterest <keyword> [amount]",
@@ -18,7 +18,7 @@ module.exports = {
 
   onStart: async function ({ message, args }) {
     if (!args[0]) {
-      return message.reply("❌ Please provide a search keyword. Usage: pinterest <keyword> [amount]");
+      return message.reply("❌ Please provide a search keyword.\n📘 Usage: pinterest <keyword> [amount]");
     }
 
     const query = args[0];
@@ -30,14 +30,14 @@ module.exports = {
       if (amount > 70) amount = 70; // max 70 images
     }
 
-    // 🔥 Updated API URL
-    const apiUrl = `https://pin-api-itachi.vercel.app/api/pinterest?q=${encodeURIComponent(query)}`;
+    // 🔥 Use your custom Pinterest API
+    const apiUrl = `https://denish-pin.vercel.app/api/search-download?query=${encodeURIComponent(query)}`;
 
     try {
       const res = await axios.get(apiUrl);
       const data = res.data?.data || [];
 
-      if (!data.length) {
+      if (!Array.isArray(data) || !data.length) {
         return message.reply(`❌ No results found for: **${query}**`);
       }
 
@@ -53,13 +53,13 @@ module.exports = {
 
       // Send all images in one message
       await message.reply({
-        body: `📌 Pinterest results for: **${query}**\n🖼️ Showing ${attachments.length} image(s)`,
+        body: `📌 Pinterest results for: **${query}**\n🖼️ Showing ${attachments.length} image(s)\n🔹 Source: denish-pin.vercel.app`,
         attachment: attachments
       });
 
     } catch (error) {
-      console.error(error);
-      message.reply("❌ Failed to fetch Pinterest images.");
+      console.error("Pinterest command error:", error.message);
+      message.reply("❌ Failed to fetch Pinterest images. Please try again later.");
     }
   },
 };
