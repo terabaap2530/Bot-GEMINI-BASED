@@ -1,5 +1,4 @@
 const axios = require("axios");
-const https = require("https");
 const fs = require("fs");
 const path = require("path");
 const { pipeline } = require("stream");
@@ -10,7 +9,7 @@ module.exports = {
   config: {
     name: "song",
     aliases: ["sd"],
-    version: "1.3",
+    version: "1.7",
     author: "Lord Denish",
     countDown: 20,
     role: 0,
@@ -21,74 +20,69 @@ module.exports = {
   },
 
   onStart: async function ({ api, message, args, event }) {
-    if (api.setMessageReaction)
-      api.setMessageReaction("🎧", event.messageID, () => {}, true);
-
+    const react = emoji => api.setMessageReaction?.(emoji, event.messageID, () => {}, true);
     const safeReply = async (text, attachment = null) => {
       try {
         await message.reply(attachment ? { body: text, attachment } : text);
       } catch (e) {
-        console.error("Reply failed:", e);
+        console.error("Reply failed:", e.message);
       }
     };
 
     if (!args.length) {
-      if (api.setMessageReaction)
-        api.setMessageReaction("⚠️", event.messageID, () => {}, true);
+      react("⚠️");
       return safeReply("⚠️ Please provide a song name.");
     }
 
     const songName = args.join(" ");
-    const startTime = Date.now();
+    const start = Date.now();
 
     try {
-      // Step 1: Fetch song info
+      // Step 1: Fetch song info from your API
       const { data } = await axios.get(
         `https://dens-song-dl.vercel.app/api/song?query=${encodeURIComponent(songName)}`
       );
 
       if (!data?.status || !data?.result) {
-        if (api.setMessageReaction)
-          api.setMessageReaction("❌", event.messageID, () => {}, true);
+        react("❌");
         return safeReply("❌ No download link found or song unavailable.");
       }
 
-      const { title, thumbnail, result: downloadUrl } = data;
-      const tempFileName = `song_${Date.now()}_${Math.random().toString(36).slice(2)}.mp3`;
-      const tempPath = path.join(__dirname, tempFileName);
+      const { title, result: downloadUrl } = data;
+      const tempFile = path.join(__dirname, `song_${Date.now()}.mp3`);
 
-      // Step 2: Download MP3
-      const audioResponse = await axios({
+      // Step 2: Stream download with proper headers
+      const response = await axios({
         method: "get",
         url: downloadUrl,
         responseType: "stream",
-        httpsAgent: new https.Agent({ rejectUnauthorized: false }),
-        headers: { "User-Agent": "Mozilla/5.0", Accept: "*/*" },
-        timeout: 120000
+        headers: {
+          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
+          "Accept": "audio/mpeg, audio/*;q=0.9,*/*;q=0.8",
+          "Referer": "https://dens-song-dl.vercel.app/"
+        },
+        maxRedirects: 5,
+        timeout: 180000 // 3 minutes max
       });
 
-      await streamPipeline(audioResponse.data, fs.createWriteStream(tempPath));
+      await streamPipeline(response.data, fs.createWriteStream(tempFile));
 
-      // Step 3: Send audio file
+      // Step 3: Send MP3 file
       await safeReply(
         `✅ *Downloaded Successfully!*  
 🎶 *Title:* ${title}  
-⚡ *Time Taken:* ${(Date.now() - startTime) / 1000}s  
+⚡ *Time Taken:* ${(Date.now() - start) / 1000}s  
 👤 *By:* ${data.creator}`,
-        fs.createReadStream(tempPath)
+        fs.createReadStream(tempFile)
       );
 
-      if (api.setMessageReaction)
-        api.setMessageReaction("✅", event.messageID, () => {}, true);
+      react("✅");
 
-      // Step 4: Delete temp file after send
-      try {
-        fs.unlinkSync(tempPath);
-      } catch {}
+      // Step 4: Cleanup
+      setTimeout(() => fs.unlink(tempFile, () => {}), 5000);
     } catch (err) {
-      console.error("❌ [Song Command Error]:", err?.stack || err?.message || err);
-      if (api.setMessageReaction)
-        api.setMessageReaction("❌", event.messageID, () => {}, true);
+      console.error("❌ [Song Command Error]:", err?.stack || err);
+      react("❌");
       return safeReply("❌ Something went wrong while downloading the song.");
     }
   }
