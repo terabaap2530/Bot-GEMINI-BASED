@@ -10,17 +10,17 @@ module.exports = {
   config: {
     name: "sing",
     aliases: ["s"],
-    version: "6.0",
+    version: "6.3",
     author: "Lord Denish",
     countDown: 20,
     role: 0,
-    shortDescription: { en: "Auto-download songs from YouTube or recognized audio/video" },
-    description: "Reply to an audio/video or type a search term to download the song as MP3 automatically.",
+    shortDescription: { en: "Download full songs from YouTube as MP3" },
+    description: "Reply to a message or type a song name to download as audio.",
     category: "🎶 Media",
-    guide: { en: "{pn} <song name>\nReply to an audio/video to auto-download." }
+    guide: { en: "{pn} <song name>\nReply to a message to auto-download audio." }
   },
 
-  onStart: async function ({ api, message, args, event }) {
+  onStart: async function({ api, message, args, event }) {
     if (api.setMessageReaction) api.setMessageReaction("⏳", event.messageID, () => {}, true);
 
     const safeReply = async (text) => {
@@ -30,7 +30,7 @@ module.exports = {
     let songName;
 
     try {
-      // Recognize song if replying to audio/video
+      // Step 1: If replying to audio/video, attempt recognition
       if (event.messageReply && event.messageReply.attachments?.length > 0) {
         const attachment = event.messageReply.attachments[0];
         if (attachment.type === "audio" || attachment.type === "video") {
@@ -44,18 +44,18 @@ module.exports = {
         }
       }
 
-      // Fallback: use search term
+      // Step 2: Fallback to user query
       if (!songName) {
         if (!args.length) {
           if (api.setMessageReaction) api.setMessageReaction("⚠️", event.messageID, () => {}, true);
-          return safeReply("⚠️ | Provide a song name or reply to an audio/video.");
+          return safeReply("⚠️ | Provide a song name or reply to audio/video.");
         }
         songName = args.join(" ");
       }
 
       const startTime = Date.now();
 
-      // 🔍 Search for the song
+      // Step 3: Search using dns-ruby API
       let searchResults;
       try {
         const { data } = await axios.get(`https://dns-ruby.vercel.app/search?query=${encodeURIComponent(songName)}`);
@@ -66,18 +66,19 @@ module.exports = {
         return safeReply("❌ | Failed to search the song.");
       }
 
-      if (!searchResults || !searchResults[0]?.url) {
+      if (!searchResults || searchResults.length === 0) {
         if (api.setMessageReaction) api.setMessageReaction("❌", event.messageID, () => {}, true);
-        return safeReply("❌ | No results found for this query.");
+        return safeReply("❌ | No results found.");
       }
 
+      // Step 4: Pick the first matching full audio (ignore clips/covers if possible)
       const song = searchResults[0];
-      const videoUrl = song.url;
+      const fixedUrl = song.url.split("&")[0]; // clean URL
 
-      // 🎧 Download using your new API
+      // Step 5: Call dens-audio API for MP3
       let downloadData;
       try {
-        const { data } = await axios.get(`https://dens-audio.vercel.app/api/sing?url=${encodeURIComponent(videoUrl)}`);
+        const { data } = await axios.get(`https://dens-audio.vercel.app/api/sing?url=${encodeURIComponent(fixedUrl)}`);
         downloadData = data;
       } catch (err) {
         console.error("Download API failed:", err.message);
@@ -91,16 +92,17 @@ module.exports = {
       if (!downloadUrl) {
         console.error("Invalid response from API:", JSON.stringify(downloadData).slice(0, 500));
         if (api.setMessageReaction) api.setMessageReaction("❌", event.messageID, () => {}, true);
-        return safeReply("❌ | Download API did not return a valid MP3 link.");
+        return safeReply("❌ | Couldn’t extract audio link from API.");
       }
 
+      // Step 6: Info message
       const infoMsg = `
 🎵 *Title:* ${songTitle}
 🔗 *Source:* YouTube
 ⚡ *Fetched in:* ${(Date.now() - startTime) / 1000}s
 `;
 
-      // Download audio stream to temp file
+      // Step 7: Download audio stream
       const tempFile = path.join(__dirname, `temp_${Date.now()}.mp3`);
       try {
         const response = await axios({
@@ -109,7 +111,7 @@ module.exports = {
           responseType: "stream",
           httpsAgent: new https.Agent({ rejectUnauthorized: false }),
           headers: { "User-Agent": "Mozilla/5.0" },
-          timeout: 120000
+          timeout: 300000
         });
         await streamPipeline(response.data, fs.createWriteStream(tempFile));
       } catch (err) {
@@ -117,7 +119,7 @@ module.exports = {
         return safeReply("❌ | Failed to download the MP3 file.");
       }
 
-      // Send song file
+      // Step 8: Send audio file
       await message.reply({
         body: infoMsg,
         attachment: fs.createReadStream(tempFile)
