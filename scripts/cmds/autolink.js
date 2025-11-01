@@ -17,7 +17,8 @@ async function expandTikTokUrl(shortUrl) {
     if (res.status === 301 || res.status === 302) return res.headers.location;
     return shortUrl;
   } catch (e) {
-    if (e.response && (e.response.status === 301 || e.response.status === 302)) return e.response.headers.location;
+    if (e.response && (e.response.status === 301 || e.response.status === 302))
+      return e.response.headers.location;
     return shortUrl;
   }
 }
@@ -35,17 +36,15 @@ function chooseApiUrl(url) {
 module.exports = {
   config: {
     name: "autolink",
-    version: "3.2",
+    version: "3.3",
     author: "Lord Denish",
-    shortDescription: "Send raw playable video from Instagram/TikTok/YT/Facebook",
+    shortDescription: "Auto-download playable videos from supported links",
     category: "media"
   },
 
-  onStart: async function() {
-    // Required empty function
-  },
+  onStart: async function () {},
 
-  onChat: async function({ event, api }) {
+  onChat: async function ({ event, api }) {
     try {
       const text = event.body || "";
       const match = text.match(/https?:\/\/[^\s]+/i);
@@ -60,12 +59,11 @@ module.exports = {
       }
 
       const apiUrl = chooseApiUrl(url);
-      if (!apiUrl) {
-        await api.sendMessage("❌ Unsupported platform.", event.threadID);
-        return;
-      }
+      if (!apiUrl) return; // No message shown if unsupported
 
-      try { api.setMessageReaction("⏳", event.messageID, () => {}, true); } catch(e){}
+      try {
+        api.setMessageReaction("⏳", event.messageID, () => {}, true);
+      } catch {}
 
       const apiRes = await axios.get(apiUrl, { timeout: 20000 });
       const data = apiRes.data || {};
@@ -74,31 +72,32 @@ module.exports = {
       const hostLower = hostname.toLowerCase();
 
       if (hostLower.includes("instagram.com") && !url.includes("/stories")) {
-        videoUrl = data?.result?.url || (data?.result?.downloads ? data.result.downloads.slice(-1)[0] : null);
+        videoUrl = data?.result?.url || data?.result?.downloads?.slice(-1)[0];
       } else if (hostLower.includes("instagram.com") && url.includes("/stories")) {
-        videoUrl = data?.result?.downloads?.slice(-1)[0] || data?.downloads?.slice(-1)[0] || data?.result?.url || null;
+        videoUrl = data?.result?.downloads?.slice(-1)[0] || data?.downloads?.slice(-1)[0];
       } else if (hostLower.includes("tiktok")) {
         const tiktokData = data?.result?.result || data?.result || {};
-        // USE SD LINK ONLY
-        videoUrl = tiktokData.sd_link || tiktokData.hd_link || tiktokData.link || null;
+        videoUrl = tiktokData.sd_link || tiktokData.hd_link || tiktokData.link;
       } else if (hostLower.includes("youtube") || hostLower.includes("youtu.be")) {
-        videoUrl = data?.result?.mp4 || data?.result?.url || null;
+        videoUrl = data?.result?.mp4 || data?.result?.url;
       } else if (hostLower.includes("facebook") || hostLower.includes("fb.watch")) {
-        videoUrl = data?.result?.data?.[0]?.hd_link || data?.result?.data?.[0]?.sd_link || null;
+        videoUrl = data?.result?.data?.[0]?.hd_link || data?.result?.data?.[0]?.sd_link;
       }
 
-      if (!videoUrl || !videoUrl.startsWith("http")) {
-        try { api.setMessageReaction("💔", event.messageID, () => {}, true); } catch(e){}
-        await api.sendMessage("❌ Could not find a playable video URL.", event.threadID);
-        return;
-      }
+      if (!videoUrl || !videoUrl.startsWith("http")) return;
 
-      // TEMP file fallback if direct stream fails
       const cacheDir = path.join(__dirname, "cache");
       if (!fs.existsSync(cacheDir)) fs.mkdirSync(cacheDir);
       const tmpPath = path.join(cacheDir, `video_${Date.now()}.mp4`);
 
-      const fileResp = await axios({ method: "GET", url: videoUrl, responseType: "stream", timeout: 60000, headers: { "User-Agent": "Mozilla/5.0" } });
+      const fileResp = await axios({
+        method: "GET",
+        url: videoUrl,
+        responseType: "stream",
+        timeout: 60000,
+        headers: { "User-Agent": "Mozilla/5.0" }
+      });
+
       const writer = fs.createWriteStream(tmpPath);
       fileResp.data.pipe(writer);
 
@@ -107,18 +106,26 @@ module.exports = {
         writer.on("error", reject);
       });
 
-      await api.sendMessage({
-        body: `🎬 Video from ${hostname}`,
-        attachment: fs.createReadStream(tmpPath)
-      }, event.threadID, () => {
-        try { fs.unlinkSync(tmpPath); } catch(e){}
-        try { api.setMessageReaction("✅", event.messageID, () => {}, true); } catch(e){}
-      });
-
+      await api.sendMessage(
+        {
+          body: `🎬 ${hostname}`,
+          attachment: fs.createReadStream(tmpPath)
+        },
+        event.threadID,
+        () => {
+          try {
+            fs.unlinkSync(tmpPath);
+          } catch {}
+          try {
+            api.setMessageReaction("✅", event.messageID, () => {}, true);
+          } catch {}
+        }
+      );
     } catch (err) {
-      console.error("Autolink error:", err.stack || err.message || err);
-      try { api.setMessageReaction("💔", event.messageID, () => {}, true); } catch(e){}
-      await api.sendMessage("❌ Error fetching/sending video.", event.threadID);
+      console.error("Autolink Error:", err.message);
+      try {
+        api.setMessageReaction("💔", event.messageID, () => {}, true);
+      } catch {}
     }
   }
 };
