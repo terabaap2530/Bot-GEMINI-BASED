@@ -5,13 +5,14 @@ const { parse } = require("url");
 
 const API_ENDPOINTS = {
   instagram: url => `https://universal-dl-one.vercel.app/api/instagram?url=${encodeURIComponent(url)}`,
-  instaStory: url => `https://dens-insta-story.vercel.app/api/story?url=${encodeURIComponent(url)}`,
   tiktok: url => `https://universal-dl-one.vercel.app/api/tiktok?url=${encodeURIComponent(url)}`,
   youtube: url => `https://universal-dl-one.vercel.app/api/youtube?url=${encodeURIComponent(url)}`,
-  facebook: url => `https://universal-dl-one.vercel.app/api/facebook?url=${encodeURIComponent(url)}`
+  facebook: url => `https://universal-dl-one.vercel.app/api/facebook?url=${encodeURIComponent(url)}`,
+  pinterest: url => `https://universal-dl-one.vercel.app/api/pinterest?url=${encodeURIComponent(url)}`,
+  twitter: url => `https://universal-dl-one.vercel.app/api/twitter?url=${encodeURIComponent(url)}`
 };
 
-async function expandTikTokUrl(shortUrl) {
+async function expandShortUrl(shortUrl) {
   try {
     const res = await axios.get(shortUrl, { maxRedirects: 0, validateStatus: s => s < 400 });
     if (res.status === 301 || res.status === 302) return res.headers.location;
@@ -25,20 +26,21 @@ async function expandTikTokUrl(shortUrl) {
 
 function chooseApiUrl(url) {
   const host = parse(url).hostname || "";
-  if (host.includes("instagram.com") && url.includes("/stories")) return API_ENDPOINTS.instaStory(url);
   if (host.includes("instagram.com")) return API_ENDPOINTS.instagram(url);
   if (host.includes("tiktok.com") || host.includes("vt.tiktok.com")) return API_ENDPOINTS.tiktok(url);
   if (host.includes("youtube.com") || host.includes("youtu.be")) return API_ENDPOINTS.youtube(url);
   if (host.includes("facebook.com") || host.includes("fb.watch")) return API_ENDPOINTS.facebook(url);
+  if (host.includes("pinterest.com")) return API_ENDPOINTS.pinterest(url);
+  if (host.includes("twitter.com")) return API_ENDPOINTS.twitter(url);
   return null;
 }
 
 module.exports = {
   config: {
     name: "autolink",
-    version: "3.3",
+    version: "4.0",
     author: "Lord Denish",
-    shortDescription: "Auto-download playable videos from supported links",
+    shortDescription: "Auto-download playable videos from all supported links",
     category: "media"
   },
 
@@ -51,40 +53,36 @@ module.exports = {
       if (!match) return;
 
       let url = match[0].replace(/\?$/, "");
-      let hostname = parse(url).hostname || "";
+      const hostname = parse(url).hostname || "";
 
-      if (hostname.includes("tiktok") && url.includes("vt.tiktok.com")) {
-        url = await expandTikTokUrl(url);
-        hostname = parse(url).hostname || "";
-      }
+      // Handle TikTok short URLs
+      if (hostname.includes("vt.tiktok.com")) url = await expandShortUrl(url);
 
       const apiUrl = chooseApiUrl(url);
-      if (!apiUrl) return; // No message shown if unsupported
+      if (!apiUrl) return;
 
-      try {
-        api.setMessageReaction("⏳", event.messageID, () => {}, true);
-      } catch {}
+      try { api.setMessageReaction("⏳", event.messageID, () => {}, true); } catch {}
 
       const apiRes = await axios.get(apiUrl, { timeout: 20000 });
       const data = apiRes.data || {};
 
       let videoUrl = null;
-      const hostLower = hostname.toLowerCase();
 
-      if (hostLower.includes("instagram.com") && !url.includes("/stories")) {
-        videoUrl = data?.result?.url || data?.result?.downloads?.slice(-1)[0];
-      } else if (hostLower.includes("instagram.com") && url.includes("/stories")) {
-        videoUrl = data?.result?.downloads?.slice(-1)[0] || data?.downloads?.slice(-1)[0];
-      } else if (hostLower.includes("tiktok")) {
-        const tiktokData = data?.result?.result || data?.result || {};
-        videoUrl = tiktokData.sd_link || tiktokData.hd_link || tiktokData.link;
-      } else if (hostLower.includes("youtube") || hostLower.includes("youtu.be")) {
-        videoUrl = data?.result?.mp4 || data?.result?.url;
-      } else if (hostLower.includes("facebook") || hostLower.includes("fb.watch")) {
-        videoUrl = data?.result?.data?.[0]?.hd_link || data?.result?.data?.[0]?.sd_link;
+      if (hostname.includes("tiktok")) {
+        videoUrl = data?.result?.data?.video_url || null;
+      } else if (hostname.includes("youtube") || hostname.includes("youtu.be")) {
+        videoUrl = data?.result?.mp4 || data?.result?.url || null;
+      } else if (hostname.includes("instagram")) {
+        videoUrl = data?.result?.url || data?.result?.downloads?.slice(-1)[0] || null;
+      } else if (hostname.includes("facebook") || hostname.includes("fb.watch")) {
+        videoUrl = data?.result?.data?.[0]?.hd_link || data?.result?.data?.[0]?.sd_link || null;
+      } else if (hostname.includes("pinterest")) {
+        videoUrl = data?.result?.url || null;
+      } else if (hostname.includes("twitter")) {
+        videoUrl = data?.result?.url || null;
       }
 
-      if (!videoUrl || !videoUrl.startsWith("http")) return;
+      if (!videoUrl) return await message.reply("⚠️ Failed to fetch video.");
 
       const cacheDir = path.join(__dirname, "cache");
       if (!fs.existsSync(cacheDir)) fs.mkdirSync(cacheDir);
@@ -113,19 +111,13 @@ module.exports = {
         },
         event.threadID,
         () => {
-          try {
-            fs.unlinkSync(tmpPath);
-          } catch {}
-          try {
-            api.setMessageReaction("✅", event.messageID, () => {}, true);
-          } catch {}
+          try { fs.unlinkSync(tmpPath); } catch {}
+          try { api.setMessageReaction("✅", event.messageID, () => {}, true); } catch {}
         }
       );
     } catch (err) {
       console.error("Autolink Error:", err.message);
-      try {
-        api.setMessageReaction("💔", event.messageID, () => {}, true);
-      } catch {}
+      try { api.setMessageReaction("💔", event.messageID, () => {}, true); } catch {}
     }
   }
 };
