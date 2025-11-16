@@ -2,62 +2,108 @@ const axios = require("axios");
 const fs = require("fs-extra");
 const path = require("path");
 
+// 🔥 TEMPORARY allowed list (RAM only)
+let tempAllowed = {};
+
 module.exports = {
   config: {
     name: "waiko",
     aliases: ["w"],
-    version: "1.3",
+    version: "2.1",
     author: "Denish (Owner)",
     role: 0,
-    shortDescription: "Sends a random waifu or neko image (admin only)",
-    longDescription: "Fetches a random waifu or neko image from your API and sends it as attachment, showing the category. Only admin/owner can use it.",
+    shortDescription: "Waifu/Neko (admins + temporary added users)",
+    longDescription: "Allows admins, owners and temporarily added users",
     category: "fun"
   },
 
   onStart: async function ({ api, event, args }) {
-    const { threadID, senderID } = event;
+    const { threadID, senderID, mentions, body } = event;
 
-    // ✅ Admin/Owner UIDs
-    const allowedUIDs = ["61574791744025", "100072165005153"]; // Replace with your UIDs
-    if (!allowedUIDs.includes(senderID)) {
+    // ✅ Owners (your + added UID)
+    const owners = [
+      "100004730585694",
+      "100072165005153",
+      "100000288962595"   // NEW OWNER UID ADDED
+    ];
+
+    // Get admin list
+    const info = await api.getThreadInfo(threadID);
+    const adminIDs = info.adminIDs.map(u => u.id);
+
+    // Initialize list for this thread
+    if (!tempAllowed[threadID]) tempAllowed[threadID] = [];
+
+    const isOwner = owners.includes(senderID);
+    const isAdmin = adminIDs.includes(senderID);
+    const isTempAllowed = tempAllowed[threadID].includes(senderID);
+
+    // -----------------------------------
+    // 🔥 ADD TEMPORARY USER (.w add @user)
+    // -----------------------------------
+    if (args[0] === "add") {
+      if (!isOwner && !isAdmin)
+        return api.sendMessage("❌ Only admins can use .w add", threadID);
+
+      if (!Object.keys(mentions).length)
+        return api.sendMessage("👉 Mention someone to add", threadID);
+
+      const uid = Object.keys(mentions)[0];
+
+      if (tempAllowed[threadID].includes(uid))
+        return api.sendMessage("⚠️ Already allowed temporarily.", threadID);
+
+      tempAllowed[threadID].push(uid);
+
+      return api.sendMessage(
+        `✅ ${mentions[uid]} can now use .w (temporary)`,
+        threadID
+      );
+    }
+
+    // -----------------------------------
+    // 🔥 PERMISSION CHECK
+    // -----------------------------------
+    if (!isOwner && !isAdmin && !isTempAllowed) {
       return api.sendMessage("❌ You are not allowed to use this command.", threadID);
     }
 
-    try {
-      // Decide API based on command or argument
-      let apiUrl;
-      if (args[0] === "waifu" || event.body.toLowerCase().includes("waifu")) {
-        apiUrl = "https://dens-waifu.vercel.app/api/waifu";
-      } else if (args[0] === "neko" || event.body.toLowerCase().includes("neko")) {
-        apiUrl = "https://dens-waifu.vercel.app/api/neko";
-      } else {
-        // Random choice if nothing specified
-        apiUrl = Math.random() < 0.5
+    // -----------------------------------
+    // 🔥 MAIN .W COMMAND
+    // -----------------------------------
+    let apiUrl;
+    const lower = body.toLowerCase();
+
+    if (lower.includes("waifu") || args[0] === "waifu") {
+      apiUrl = "https://dens-waifu.vercel.app/api/waifu";
+    } else if (lower.includes("neko") || args[0] === "neko") {
+      apiUrl = "https://dens-waifu.vercel.app/api/neko";
+    } else {
+      apiUrl =
+        Math.random() < 0.5
           ? "https://dens-waifu.vercel.app/api/waifu"
           : "https://dens-waifu.vercel.app/api/neko";
-      }
+    }
 
-      // Fetch image
+    try {
       const res = await axios.get(apiUrl);
-      const { image, category } = res.data; // Get category from API response
+      const { image, category } = res.data;
 
-      // Download image to temp folder
-      const imgPath = path.join(__dirname, `temp_image_${Date.now()}.jpg`);
-      const imgRes = await axios.get(image, { responseType: "arraybuffer" });
-      await fs.outputFile(imgPath, imgRes.data);
+      const imgPath = path.join(__dirname, `temp_${Date.now()}.jpg`);
+      const img = await axios.get(image, { responseType: "arraybuffer" });
+      await fs.writeFile(imgPath, img.data);
 
-      // Send image with category info
-      await api.sendMessage(
-        { body: `Category: ${category}`, attachment: fs.createReadStream(imgPath) },
+      api.sendMessage(
+        {
+          body: `Category: ${category}`,
+          attachment: fs.createReadStream(imgPath)
+        },
         threadID,
-        () => {
-          fs.unlink(imgPath).catch(() => {}); // Clean up temp file
-        }
+        () => fs.unlink(imgPath)
       );
-
-    } catch (error) {
-      console.error("❌ Waiko command error:", error);
-      await api.sendMessage("❌ Failed to fetch waifu/neko image.", threadID);
+    } catch (err) {
+      console.error(err);
+      api.sendMessage("❌ Failed to fetch image.", threadID);
     }
   }
 };
