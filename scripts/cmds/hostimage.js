@@ -54,7 +54,7 @@ module.exports = {
       const base64Image = Buffer.from(imageData.data).toString("base64");
 
       // GitHub details
-      const GITHUB_TOKEN = "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";
+      const GITHUB_TOKEN = "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";
       const REPO = "Ryukazi/host-image";
       const BRANCH = "main";
       const PATH = `image/${fileName}`;
