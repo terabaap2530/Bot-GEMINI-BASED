@@ -43,7 +43,7 @@ module.exports = {
       const OWNER = "Ryukazi";
       const REPO = "video-hosting";
       const BRANCH = "main";
-      const TOKEN = "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"; // Must have repo permissions
+      const TOKEN = "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"; // Must have repo permissions
 
       const content = fs.readFileSync(tempPath, { encoding: "base64" });
 
