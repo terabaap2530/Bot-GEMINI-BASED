@@ -7,7 +7,7 @@ module.exports = {
     name: "hack",
     author: "Lord Denish",
     countDown: 5,
-    role: 1,
+    role: 2,
     category: "fun",
     shortDescription: {
       en: "Generates a 'hacking' image with the user's profile picture.",
