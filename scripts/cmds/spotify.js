@@ -1,82 +1,84 @@
 const axios = require("axios");
 const fs = require("fs");
 const path = require("path");
+const { pipeline } = require("stream");
+const { promisify } = require("util");
+const streamPipeline = promisify(pipeline);
+
+const wait = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
 module.exports = {
   config: {
     name: "spotify",
-    aliases: ["sp", "song"],
-    version: "2.0",
-    author: "Lord Denish",
-    description: "Download Spotify tracks as MP3 audio (no description)",
+    aliases: ["sp"],
+    author: "Denish",
+    version: "1.2",
+    cooldowns: 5,
+    role: 0,
+    shortDescription: "Download Spotify song as MP3",
+    longDescription: "Searches Spotify and sends the MP3 audio via Spotdown",
     category: "🎶 Media",
-    guide: "{pn} <song/artist/keywords>\nExample: {pn} I Wanna Be Yours"
+    guide: "{p}sing <song name>"
   },
 
   onStart: async function ({ api, event, args }) {
-    const safeReply = async (text) => {
-      try { await api.sendMessage(text, event.threadID, event.messageID); }
-      catch (e) { console.error("Reply failed:", e); }
-    };
+    if (!args.length) return api.sendMessage("⚠️ Please provide a song name.", event.threadID, event.messageID);
 
-    if (!args.length)
-      return safeReply("⚠️ Usage: .spotify <song/artist/keywords>");
-
-    const query = args.join(" ").trim();
+    const songName = args.join(" ");
+    api.setMessageReaction("⏳", event.messageID, () => {}, true);
 
     try {
-      const apiUrl = `https://search-spotify.vercel.app/api/spotify/search-download?q=${encodeURIComponent(query)}`;
-      const { data } = await axios.get(apiUrl, {
-        timeout: 25000,
-        headers: { "User-Agent": "Mozilla/5.0" },
-      });
+      // Step 1: Search Spotify
+      const searchRes = await axios.get(`https://spotify-search-api-dens.onrender.com/api/song?query=${encodeURIComponent(songName)}`);
+      const songs = searchRes.data?.result?.songs;
+      if (!songs || songs.length === 0) return api.sendMessage("❌ No songs found.", event.threadID, event.messageID);
 
-      if (!data?.status || !data?.data?.download)
-        return safeReply("❌ No audio found for your query.");
+      const song = songs[0]; // pick first result
+      const trackUrl = song.url;
 
-      const song = data.data;
-      const tempFile = path.join(__dirname, `spotify_${Date.now()}.mp3`);
+      // Step 2: Generate Spotdown MP3 link
+      const downloadRes = await axios.get(`https://spotdown-api.onrender.com/api/generate-link?trackUrl=${encodeURIComponent(trackUrl)}`);
+      const downloadUrl = downloadRes.data?.data?.downloadLinks?.[0]?.url;
+      if (!downloadUrl) return api.sendMessage("❌ Could not generate MP3 link.", event.threadID, event.messageID);
 
-      const audioResponse = await axios({
-        method: "get",
-        url: song.download,
+      // Step 2b: Wait for stream to be ready
+      await wait(10000); // wait 10 seconds
+
+      // Step 3: Make sure cache folder exists
+      const cacheDir = path.join(__dirname, "cache");
+      if (!fs.existsSync(cacheDir)) fs.mkdirSync(cacheDir);
+
+      const tempFile = path.join(cacheDir, `song_${Date.now()}.mp3`);
+
+      // Step 4: Stream MP3 and save locally
+      const response = await axios({
+        url: downloadUrl,
+        method: "GET",
         responseType: "stream",
-        headers: { "User-Agent": "Mozilla/5.0" },
+        timeout: 300000,
+        headers: { "User-Agent": "Mozilla/5.0" }
       });
 
-      const writer = fs.createWriteStream(tempFile);
-      audioResponse.data.pipe(writer);
+      await streamPipeline(response.data, fs.createWriteStream(tempFile));
 
-      writer.on("finish", async () => {
-        try {
-          const sent = await api.sendMessage(
-            { attachment: fs.createReadStream(tempFile) },
-            event.threadID
-          );
+      // Step 5: Send MP3 to chat
+      await api.sendMessage(
+        { 
+          body: `🎵 *Title:* ${song.title}\n👤 *Artist:* ${song.artist}`, 
+          attachment: fs.createReadStream(tempFile) 
+        },
+        event.threadID,
+        () => {
+          fs.unlinkSync(tempFile); // delete after sending
+          api.setMessageReaction("✅", event.messageID, () => {}, true);
+        },
+        event.messageID
+      );
 
-          try {
-            await api.setMessageReaction("🎧", sent.messageID);
-            await api.setMessageReaction("🔥", sent.messageID);
-          } catch (e) {
-            console.error("Reaction failed:", e);
-          }
-
-          fs.unlinkSync(tempFile);
-        } catch (err) {
-          console.error("Send error:", err);
-          await safeReply("❌ Failed to send audio file.");
-          try { fs.unlinkSync(tempFile); } catch (e) {}
-        }
-      });
-
-      writer.on("error", async (err) => {
-        console.error("Write stream error:", err);
-        await safeReply("❌ Error saving Spotify track.");
-        try { fs.unlinkSync(tempFile); } catch (e) {}
-      });
     } catch (err) {
-      console.error("Spotify error:", err?.message || err);
-      await safeReply("❌ Failed to fetch Spotify audio. Try again later.");
+      console.error("Spotify cmd error:", err);
+      api.sendMessage("❌ Failed to fetch or send the song.", event.threadID, event.messageID);
+      api.setMessageReaction("⚠️", event.messageID, () => {}, true);
     }
-  },
+  }
 };
