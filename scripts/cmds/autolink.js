@@ -38,9 +38,9 @@ function chooseApiUrl(url) {
 module.exports = {
   config: {
     name: "autolink",
-    version: "4.0",
+    version: "4.3",
     author: "Lord Denish",
-    shortDescription: "Auto-download playable videos from all supported links",
+    shortDescription: "Silent auto downloader with only reactions",
     category: "media"
   },
 
@@ -55,45 +55,63 @@ module.exports = {
       let url = match[0].replace(/\?$/, "");
       const hostname = parse(url).hostname || "";
 
-      // Handle TikTok short URLs
-      if (hostname.includes("vt.tiktok.com")) url = await expandShortUrl(url);
+      // Reaction: Processing
+      try { api.setMessageReaction("⏳", event.messageID, () => {}, true); } catch {}
+
+      if (hostname.includes("vt.tiktok.com"))
+        url = await expandShortUrl(url);
 
       const apiUrl = chooseApiUrl(url);
       if (!apiUrl) return;
 
-      try { api.setMessageReaction("⏳", event.messageID, () => {}, true); } catch {}
-
       const apiRes = await axios.get(apiUrl, { timeout: 20000 });
       const data = apiRes.data || {};
-
       let videoUrl = null;
 
+      // Platform handling
       if (hostname.includes("tiktok")) {
-        videoUrl = data?.result?.data?.video_url || null;
+        videoUrl =
+          data?.result?.videoHd ||
+          data?.result?.video ||
+          data?.result?.videos?.[0] ||
+          null;
+
       } else if (hostname.includes("youtube") || hostname.includes("youtu.be")) {
         videoUrl = data?.result?.mp4 || data?.result?.url || null;
+
       } else if (hostname.includes("instagram")) {
-        videoUrl = data?.result?.url || data?.result?.downloads?.slice(-1)[0] || null;
+        videoUrl =
+          data?.result?.data?.videoUrl ||
+          data?.result?.videoUrl ||
+          data?.videoUrl ||
+          null;
+
       } else if (hostname.includes("facebook") || hostname.includes("fb.watch")) {
-        videoUrl = data?.result?.data?.[0]?.hd_link || data?.result?.data?.[0]?.sd_link || null;
-      } else if (hostname.includes("pinterest")) {
-        videoUrl = data?.result?.url || null;
-      } else if (hostname.includes("twitter")) {
+        videoUrl =
+          data?.result?.data?.[0]?.hd_link ||
+          data?.result?.data?.[0]?.sd_link ||
+          null;
+
+      } else if (hostname.includes("pinterest") || hostname.includes("twitter")) {
         videoUrl = data?.result?.url || null;
       }
 
-      if (!videoUrl) return await message.reply("⚠️ Failed to fetch video.");
+      if (!videoUrl) {
+        try { api.setMessageReaction("💔", event.messageID, () => {}, true); } catch {}
+        return;
+      }
 
       const cacheDir = path.join(__dirname, "cache");
       if (!fs.existsSync(cacheDir)) fs.mkdirSync(cacheDir);
+
       const tmpPath = path.join(cacheDir, `video_${Date.now()}.mp4`);
 
       const fileResp = await axios({
         method: "GET",
         url: videoUrl,
         responseType: "stream",
-        timeout: 60000,
-        headers: { "User-Agent": "Mozilla/5.0" }
+        headers: { "User-Agent": "Mozilla/5.0" },
+        timeout: 60000
       });
 
       const writer = fs.createWriteStream(tmpPath);
@@ -106,7 +124,6 @@ module.exports = {
 
       await api.sendMessage(
         {
-          body: `🎬 ${hostname}`,
           attachment: fs.createReadStream(tmpPath)
         },
         event.threadID,
@@ -115,6 +132,7 @@ module.exports = {
           try { api.setMessageReaction("✅", event.messageID, () => {}, true); } catch {}
         }
       );
+
     } catch (err) {
       console.error("Autolink Error:", err.message);
       try { api.setMessageReaction("💔", event.messageID, () => {}, true); } catch {}
