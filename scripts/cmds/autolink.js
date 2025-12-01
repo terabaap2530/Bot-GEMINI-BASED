@@ -1,6 +1,4 @@
 const axios = require("axios");
-const fs = require("fs");
-const path = require("path");
 const { parse } = require("url");
 
 const API_ENDPOINTS = {
@@ -38,9 +36,9 @@ function chooseApiUrl(url) {
 module.exports = {
   config: {
     name: "autolink",
-    version: "4.3",
+    version: "6.0",
     author: "Lord Denish",
-    shortDescription: "Silent auto downloader with only reactions",
+    shortDescription: "Fast auto downloader with streaming video",
     category: "media"
   },
 
@@ -55,7 +53,6 @@ module.exports = {
       let url = match[0].replace(/\?$/, "");
       const hostname = parse(url).hostname || "";
 
-      // Reaction: Processing
       try { api.setMessageReaction("⏳", event.messageID, () => {}, true); } catch {}
 
       if (hostname.includes("vt.tiktok.com"))
@@ -68,30 +65,47 @@ module.exports = {
       const data = apiRes.data || {};
       let videoUrl = null;
 
-      // Platform handling
+      // TikTok: fetch hosted MP4 from API
       if (hostname.includes("tiktok")) {
-        videoUrl =
-          data?.result?.videoHd ||
-          data?.result?.video ||
-          data?.result?.videos?.[0] ||
-          null;
+        videoUrl = data?.result?.hosted || null;
+        if (!videoUrl) {
+          try { api.setMessageReaction("💔", event.messageID, () => {}, true); } catch {}
+          return;
+        }
 
-      } else if (hostname.includes("youtube") || hostname.includes("youtu.be")) {
+        // Stream video directly without saving
+        const response = await axios({
+          url: videoUrl,
+          method: "GET",
+          responseType: "stream",
+          headers: { "User-Agent": "Mozilla/5.0" },
+          timeout: 20000
+        });
+
+        await api.sendMessage(
+          { attachment: response.data },
+          event.threadID,
+          () => {
+            try { api.setMessageReaction("✅", event.messageID, () => {}, true); } catch {}
+          }
+        );
+        return;
+      }
+
+      // Other platforms
+      if (hostname.includes("youtube") || hostname.includes("youtu.be")) {
         videoUrl = data?.result?.mp4 || data?.result?.url || null;
-
       } else if (hostname.includes("instagram")) {
         videoUrl =
           data?.result?.data?.videoUrl ||
           data?.result?.videoUrl ||
           data?.videoUrl ||
           null;
-
       } else if (hostname.includes("facebook") || hostname.includes("fb.watch")) {
         videoUrl =
           data?.result?.data?.[0]?.hd_link ||
           data?.result?.data?.[0]?.sd_link ||
           null;
-
       } else if (hostname.includes("pinterest") || hostname.includes("twitter")) {
         videoUrl = data?.result?.url || null;
       }
@@ -101,34 +115,19 @@ module.exports = {
         return;
       }
 
-      const cacheDir = path.join(__dirname, "cache");
-      if (!fs.existsSync(cacheDir)) fs.mkdirSync(cacheDir);
-
-      const tmpPath = path.join(cacheDir, `video_${Date.now()}.mp4`);
-
-      const fileResp = await axios({
-        method: "GET",
+      // Stream other platform videos
+      const response = await axios({
         url: videoUrl,
+        method: "GET",
         responseType: "stream",
         headers: { "User-Agent": "Mozilla/5.0" },
-        timeout: 60000
-      });
-
-      const writer = fs.createWriteStream(tmpPath);
-      fileResp.data.pipe(writer);
-
-      await new Promise((resolve, reject) => {
-        writer.on("finish", resolve);
-        writer.on("error", reject);
+        timeout: 20000
       });
 
       await api.sendMessage(
-        {
-          attachment: fs.createReadStream(tmpPath)
-        },
+        { attachment: response.data },
         event.threadID,
         () => {
-          try { fs.unlinkSync(tmpPath); } catch {}
           try { api.setMessageReaction("✅", event.messageID, () => {}, true); } catch {}
         }
       );
