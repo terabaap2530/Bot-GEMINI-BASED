@@ -4,46 +4,49 @@ module.exports = {
   config: {
     name: "pinterest",
     aliases: ["pin", "pins"],
-    version: "2.0",
+    version: "2.2",
     author: "Lord Denish",
     countDown: 5,
     role: 0,
     shortDescription: "Get Pinterest images",
     longDescription: "Fetch up to 70 Pinterest images using your custom API",
     category: "fun",
-    guide: {
-      en: "{p}pinterest <keyword> [amount]",
-    },
+    guide: "{p}pinterest <keywords> - <amount>",
   },
 
   onStart: async function ({ message, args }) {
     if (!args[0]) {
-      return message.reply("❌ Please provide a search keyword.\n📘 Usage: pinterest <keyword> [amount]");
+      return message.reply("❌ Provide keywords.\nUsage: pinterest <keywords> - <amount>");
     }
 
-    const query = args[0];
+    // 🔥 Last argument = amount
     let amount = 1;
+    const lastArg = args[args.length - 1];
 
-    if (args[1]) {
-      amount = parseInt(args[1]);
-      if (isNaN(amount) || amount < 1) amount = 1;
-      if (amount > 70) amount = 70; // max 70 images
+    if (!isNaN(parseInt(lastArg))) {
+      amount = parseInt(lastArg);
+      args.pop();
     }
 
-    // 🔥 Use your custom Pinterest API
+    if (amount < 1) amount = 1;
+    if (amount > 70) amount = 70;
+
+    // 🔥 Multi-word keywords
+    const query = args.join(" ");
+
     const apiUrl = `https://denish-pin.vercel.app/api/search-download?query=${encodeURIComponent(query)}`;
 
     try {
       const res = await axios.get(apiUrl);
       const data = res.data?.data || [];
 
-      if (!Array.isArray(data) || !data.length) {
-        return message.reply(`❌ No results found for: **${query}**`);
+      if (!data.length) {
+        return message.reply("❌ No results found.");
       }
 
       const images = data.slice(0, amount);
 
-      // Download all images as streams
+      // 🔥 Convert URLs to streams
       const attachments = await Promise.all(
         images.map(async (url) => {
           const response = await axios.get(url, { responseType: "stream" });
@@ -51,15 +54,14 @@ module.exports = {
         })
       );
 
-      // Send all images in one message
+      // 🖼️ **Send only images — no text**
       await message.reply({
-        body: `📌 Pinterest results for: **${query}**\n🖼️ Showing ${attachments.length} image(s)\n🔹 Source: denish-pin.vercel.app`,
         attachment: attachments
       });
 
     } catch (error) {
-      console.error("Pinterest command error:", error.message);
-      message.reply("❌ Failed to fetch Pinterest images. Please try again later.");
+      console.error("Pinterest error:", error);
+      message.reply("❌ Error fetching images.");
     }
   },
 };
